@@ -36,9 +36,12 @@ function qrCode(): Plugin {
 }
 
 export default defineConfig({
-  // Relative base so the built app can be dropped under any path
-  // (GitHub Pages project sites, a subfolder on a static host, file previews).
-  base: './',
+  // Relative by default, so the build can be dropped under any path on any
+  // static host. GitHub Pages serves a project site from a subdirectory and
+  // needs that path spelled out, which the deploy workflow supplies as
+  // BASE_PATH=/<repo>/ — an absolute base keeps the service worker's scope and
+  // the manifest's start_url unambiguous.
+  base: process.env.BASE_PATH || './',
   plugins: [
     react(),
     qrCode(),
