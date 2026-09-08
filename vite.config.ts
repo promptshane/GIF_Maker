@@ -1,6 +1,39 @@
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
+import qrcode from 'qrcode-terminal';
+
+/**
+ * Prints a QR code for the dev server's LAN address so the app can be opened on
+ * a phone by scanning, without typing an IP.
+ *
+ * It reads Vite's own resolved URL rather than assuming a port, so it stays
+ * correct when something else picks the port (PROGRAMS launches this on 4784).
+ */
+function qrCode(): Plugin {
+  return {
+    name: 'gif-maker:qr-code',
+    apply: 'serve',
+    configureServer(server) {
+      const printUrls = server.printUrls.bind(server);
+      server.printUrls = () => {
+        printUrls();
+        const url = server.resolvedUrls?.network?.[0] ?? server.resolvedUrls?.local?.[0];
+        if (!url) return;
+        console.log('');
+        qrcode.generate(url, { small: true });
+        console.log(`  Scan with the iPhone Camera app (same Wi-Fi): ${url}`);
+        // Plain http is not a secure context, so iOS withholds the share sheet
+        // and the service worker. Say so rather than let it look broken.
+        if (url.startsWith('http://')) {
+          console.log('  Note: over http, "Save / Share" and offline support are unavailable.');
+          console.log('        Deploy over https for the full installable app.');
+        }
+        console.log('');
+      };
+    },
+  };
+}
 
 export default defineConfig({
   // Relative base so the built app can be dropped under any path
@@ -8,6 +41,7 @@ export default defineConfig({
   base: './',
   plugins: [
     react(),
+    qrCode(),
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['icons/apple-touch-icon.png', 'icons/favicon-32.png'],

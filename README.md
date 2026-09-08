@@ -24,21 +24,35 @@ npm run dev          # http://localhost:5173 (also served on your LAN)
 | `npm run typecheck` | Type-check the app and the tests |
 | `npm test` | Unit tests (Vitest, Node) |
 | `npm run test:e2e` | Browser tests (Playwright: WebKit at iPhone size, plus Chromium) |
+| `npm run qr -- <url>` | Print a scannable QR code for any URL (e.g. the deployed site) |
 | `npm run fixtures` | Regenerate the test media with ffmpeg |
 | `npm run icons` | Regenerate the PWA icons |
 
 ### Trying it on your phone during development
 
-`npm run dev` binds to `0.0.0.0`. Open `http://<your-mac's-LAN-IP>:5173` on the
-phone while both are on the same Wi-Fi.
+`npm run dev` binds to `0.0.0.0` and prints a **QR code** for its LAN address —
+scan it with the iPhone Camera app while both devices are on the same Wi-Fi. The
+QR uses Vite's own resolved URL, so it stays correct whatever port the server
+ends up on.
 
 One caveat: **the Web Share API and the service worker need a secure context.**
-`http://` on a LAN IP is not one, so on a plain dev URL you will get the download
-fallback instead of the iOS share sheet, and the app will not be installable.
-Everything else works. To exercise sharing and installation before deploying, put
-the dev server behind an HTTPS tunnel (`cloudflared tunnel --url
-http://localhost:5173`, `ngrok http 5173`, or similar) and open the `https://`
-address.
+`http://` on a LAN IP is not one, so on a plain dev URL:
+
+- the **Save / Share** button is hidden (the iOS share sheet is unavailable), and
+- there is no service worker, so no offline support and no real installation.
+
+Saving still works via **press and hold the GIF → Add to Photos**, and everything
+else behaves normally — it is fine for trying the editor, but not the full app.
+
+For the complete experience, deploy over HTTPS (below) and QR that URL instead:
+
+```bash
+npm run qr -- https://<your-site>/
+```
+
+To test sharing and installation *before* deploying, put the dev server behind an
+HTTPS tunnel (`cloudflared tunnel --url http://localhost:5173`, `ngrok http
+5173`, or similar) and open the `https://` address.
 
 ---
 

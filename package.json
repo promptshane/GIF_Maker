@@ -13,7 +13,8 @@
     "test:unit": "vitest run",
     "test:e2e": "npm run fixtures && playwright test",
     "fixtures": "node scripts/make-fixtures.mjs",
-    "icons": "node scripts/make-icons.mjs"
+    "icons": "node scripts/make-icons.mjs",
+    "qr": "node scripts/qr.mjs"
   },
   "dependencies": {
     "gifenc": "^1.0.3",
@@ -28,6 +29,7 @@
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.7",
     "@vitejs/plugin-react": "^6.1.1",
+    "qrcode-terminal": "^0.12.0",
     "typescript": "^7.0.2",
     "vite": "^8.2.2",
     "vite-plugin-pwa": "^1.3.0",
