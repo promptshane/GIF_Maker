@@ -8,3 +8,6 @@ tests/fixtures/*.mp4
 tests/fixtures/*.jpg
 tests/fixtures/*.png
 *.local
+
+# TypeScript incremental build cache (tsc -b)
+*.tsbuildinfo
