@@ -1,5 +1,7 @@
 # GIF Maker
 
+**Live: <https://promptshane.github.io/GIF_Maker/>**
+
 A personal, install-to-home-screen GIF maker for iPhone. Import photos or a
 video, edit, preview, pick a quality, generate a real `.gif`, see its exact size,
 and save it to Photos.
@@ -200,20 +202,29 @@ compress differently. There is no target-size feature and none is planned.
 
 ## Deploying
 
-The build is fully static — `dist/` can go on any static host. `base` is `'./'`,
-so a subdirectory works without configuration.
+This repo already deploys itself. Pushing to `main` runs
+[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml), which
+type-checks, runs the unit suite, builds, and publishes to GitHub Pages at
+<https://promptshane.github.io/GIF_Maker/>.
+
+To deploy somewhere else, the build is fully static — `dist/` can go on any host:
 
 ```bash
-npm run build
+npm run build                      # relative base: works in any subdirectory
+BASE_PATH=/my-sub-path/ npm run build   # absolute base, if a host needs one
 ```
 
 | Host | How |
 | --- | --- |
+| **GitHub Pages** | Already wired up. The workflow sets `BASE_PATH=/<repo>/` because a project site is served from a subdirectory |
 | **Netlify** | Drag `dist/` onto the dashboard, or connect the repo with build `npm run build` and publish directory `dist` |
 | **Vercel** | Import the repo; the Vite preset is detected |
 | **Cloudflare Pages** | Build `npm run build`, output `dist` |
-| **GitHub Pages** | Push `dist/` to `gh-pages`. The relative `base` means a project-site URL works as-is |
 | **Anything else** | Copy `dist/`. Configure the server to fall back to `index.html` for unknown paths |
+
+`base` defaults to `'./'` so the build works from any subdirectory without
+configuration. GitHub Pages gets an explicit absolute base instead, which keeps
+the service worker's scope and the manifest's `start_url` unambiguous.
 
 **HTTPS is required** for the service worker, installation, and the iOS share
 sheet. Every host above provides it.
@@ -222,8 +233,15 @@ sheet. Every host above provides it.
 
 ## Putting it on your iPhone
 
-1. Open the deployed `https://` URL in **Safari** (not Chrome — only Safari can
-   install to the Home Screen on iOS).
+Scan this, or run `npm run qr -- https://promptshane.github.io/GIF_Maker/` to
+print it in the terminal:
+
+```
+https://promptshane.github.io/GIF_Maker/
+```
+
+1. Open that URL in **Safari** (not Chrome — only Safari can install to the Home
+   Screen on iOS).
 2. Tap the **Share** button, then **Add to Home Screen**, then **Add**.
 3. Launch it from the Home Screen. It opens standalone, without Safari's
    chrome, and uses the full screen including the area around the notch.
