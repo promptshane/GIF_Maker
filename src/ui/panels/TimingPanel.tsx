@@ -6,7 +6,6 @@ import { MAX_GIF_FPS } from '../../render/timeline';
 import { formatTimecode } from '../../lib/format';
 import { useGesture } from '../gestures';
 import { clamp } from '../../render/geometry';
-import { loadPrefs } from '../../state/prefs';
 
 const FPS_OPTIONS = [10, 15, 20, 24, 30, 60];
 const SPEEDS = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4];
@@ -22,7 +21,6 @@ export function TimingPanel() {
     <>
       {kind === 'video' ? <VideoTiming /> : <PhotoTiming />}
       <FpsField />
-      {kind === 'photos' && <PhotoDurationField />}
     </>
   );
 }
@@ -63,7 +61,8 @@ function VideoTiming() {
   const setTrim = useStore((state) => state.setTrim);
   const setDirection = useStore((state) => state.setDirection);
   const setSpeed = useStore((state) => state.setSpeed);
-  const ensurePreviewCache = useStore((state) => state.ensurePreviewCache);
+  const setTrimScrub = useStore((state) => state.setTrimScrub);
+  const cacheStale = useStore((state) => state.cacheStale);
   if (!video) return null;
 
   const selected = settings.trimEnd - settings.trimStart;
@@ -76,13 +75,18 @@ function VideoTiming() {
           start={settings.trimStart}
           end={settings.trimEnd}
           onChange={setTrim}
-          onCommit={() => void ensurePreviewCache()}
+          onScrub={setTrimScrub}
         />
         <div className="row" style={{ justifyContent: 'space-between', fontSize: 12, color: 'var(--text-dim)' }}>
           <span>{formatTimecode(settings.trimStart)}</span>
           <span>of {formatTimecode(video.duration)}</span>
           <span>{formatTimecode(settings.trimEnd)}</span>
         </div>
+        {cacheStale && (
+          <div className="hint">
+            Showing the exact frame under the handle. Press play to build the preview for this range.
+          </div>
+        )}
       </Field>
 
       <Field label="Direction">
@@ -120,22 +124,25 @@ function VideoTiming() {
 }
 
 /**
- * Two-grip trim rail. Grips are 34px wide with generous hit areas so they stay
- * usable with a thumb, and the range is committed on release so the preview
- * cache is rebuilt once rather than on every pixel of movement.
+ * Two-grip trim rail, sized for a thumb.
+ *
+ * Dragging a grip reports the timestamp under it so the preview can show that
+ * exact source frame. Rebuilding the preview cache is deliberately *not* done
+ * here — it happens when playback next needs it, so fine-tuning a trim point
+ * never blocks on a decode pass.
  */
 function TrimRail({
   duration,
   start,
   end,
   onChange,
-  onCommit,
+  onScrub,
 }: {
   duration: number;
   start: number;
   end: number;
   onChange: (start: number, end: number) => void;
-  onCommit: () => void;
+  onScrub: (time: number | null) => void;
 }) {
   const railRef = useRef<HTMLDivElement | null>(null);
   const startRef = useRef<HTMLDivElement | null>(null);
@@ -148,12 +155,20 @@ function TrimRail({
   };
 
   useGesture(startRef, {
-    onMove: (info) => onChange(Math.min(toTime(info.clientX), end - 0.05), end),
-    onEnd: onCommit,
+    onStart: (info) => onScrub(Math.min(toTime(info.clientX), end - 0.05)),
+    onMove: (info) => {
+      const next = Math.min(toTime(info.clientX), end - 0.05);
+      onChange(next, end);
+      onScrub(next);
+    },
   });
   useGesture(endRef, {
-    onMove: (info) => onChange(start, Math.max(toTime(info.clientX), start + 0.05)),
-    onEnd: onCommit,
+    onStart: (info) => onScrub(Math.max(toTime(info.clientX), start + 0.05)),
+    onMove: (info) => {
+      const next = Math.max(toTime(info.clientX), start + 0.05);
+      onChange(start, next);
+      onScrub(next);
+    },
   });
 
   const left = duration > 0 ? (start / duration) * 100 : 0;
@@ -195,7 +210,13 @@ function PhotoTiming() {
   const reorderPhotos = useStore((state) => state.reorderPhotos);
   const removePhoto = useStore((state) => state.removePhoto);
   const duplicatePhoto = useStore((state) => state.duplicatePhoto);
+  const importPhotos = useStore((state) => state.importPhotos);
+  const setPhotoDuration = useStore((state) => state.setPhotoDuration);
+  const setAllDurations = useStore((state) => state.setAllPhotoDurations);
+  const addInput = useRef<HTMLInputElement | null>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
+
+  const total = photos.reduce((sum, photo) => sum + photo.durationMs, 0);
 
   const index = Math.min(selectedIndex, Math.max(0, photos.length - 1));
   const selected = photos[index];
@@ -221,6 +242,14 @@ function PhotoTiming() {
       </div>
 
       <div className="icon-row" style={{ marginTop: 8 }}>
+        <button
+          type="button"
+          className="icon-btn"
+          onClick={() => addInput.current?.click()}
+          aria-label="Add photos"
+        >
+          + Add
+        </button>
         <button
           type="button"
           className="icon-btn"
@@ -268,7 +297,7 @@ function PhotoTiming() {
         </button>
       </div>
 
-      <div style={{ marginTop: 14 }}>
+      <div style={{ marginTop: 12 }}>
         <div className="field-label">
           <span>Photo {index + 1} duration</span>
           <span className="value">{(selected.durationMs / 1000).toFixed(2)}s</span>
@@ -280,49 +309,46 @@ function PhotoTiming() {
           step={50}
           value={selected.durationMs}
           aria-label={`Duration of photo ${index + 1}`}
-          onChange={(event) =>
-            useStore.getState().setPhotoDuration(selected.id, Number(event.target.value))
-          }
+          onChange={(event) => setPhotoDuration(selected.id, Number(event.target.value))}
         />
-      </div>
-    </Field>
-  );
-}
-
-function PhotoDurationField() {
-  const setAll = useStore((state) => state.setAllPhotoDurations);
-  const photos = useStore((state) => state.photos);
-  const [value, setValue] = useState(() => loadPrefs().photoDurationMs);
-
-  const total = photos.reduce((sum, photo) => sum + photo.durationMs, 0);
-
-  return (
-    <Field label="Set every photo" value={`${(value / 1000).toFixed(2)}s each`}>
-      <input
-        type="range"
-        min={100}
-        max={5000}
-        step={50}
-        value={value}
-        aria-label="Duration for every photo"
-        onChange={(event) => setValue(Number(event.target.value))}
-      />
-      <div className="chips" style={{ marginTop: 4 }}>
-        {[200, 300, 500, 800, 1000, 2000].map((ms) => (
-          <button key={ms} type="button" className="chip-btn" onClick={() => setValue(ms)}>
-            {(ms / 1000).toFixed(ms % 1000 === 0 ? 0 : 1)}s
+        <div className="chips">
+          {[300, 500, 1000, 2000].map((ms) => (
+            <button
+              key={ms}
+              type="button"
+              className="chip-btn"
+              onClick={() => setPhotoDuration(selected.id, ms)}
+            >
+              {(ms / 1000).toFixed(ms % 1000 === 0 ? 0 : 1)}s
+            </button>
+          ))}
+          <button
+            type="button"
+            className="chip-btn"
+            style={{ background: 'var(--accent)', color: '#fff' }}
+            onClick={() => setAllDurations(selected.durationMs)}
+            aria-label="Apply this duration to every photo"
+          >
+            Apply to all
           </button>
-        ))}
-        <button
-          type="button"
-          className="chip-btn"
-          style={{ background: 'var(--accent)', color: '#fff' }}
-          onClick={() => setAll(value)}
-        >
-          Apply to all
-        </button>
+        </div>
+        <div className="hint">
+          Total {(total / 1000).toFixed(2)}s across {photos.length} photos.
+        </div>
       </div>
-      <div className="hint">Current total: {(total / 1000).toFixed(2)}s across {photos.length} photos.</div>
+
+      <input
+        ref={addInput}
+        type="file"
+        accept="image/*,.heic,.heif"
+        multiple
+        hidden
+        onChange={(event) => {
+          const files = Array.from(event.target.files ?? []);
+          event.target.value = '';
+          if (files.length) void importPhotos(files);
+        }}
+      />
     </Field>
   );
 }

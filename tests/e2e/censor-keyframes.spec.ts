@@ -17,7 +17,7 @@ async function dragOverlayTo(page: Page, fx: number, fy: number) {
 test('a censor region follows keyframes across the timeline', async ({ page }) => {
   await openApp(page);
   await importVideo(page);
-  await openTab(page, 'Timing');
+  await openTab(page, 'Edit');
   await page.getByRole('button', { name: '10', exact: true }).click();
 
   await openTab(page, 'Censor');

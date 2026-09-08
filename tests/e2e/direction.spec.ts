@@ -18,7 +18,7 @@ test.describe('Playback direction', () => {
   test.beforeEach(async ({ page }) => {
     await openApp(page);
     await importVideo(page);
-    await openTab(page, 'Timing');
+    await openTab(page, 'Edit');
     // Keep it cheap: 10 FPS over the whole 4s clip.
     await page.getByRole('button', { name: '10', exact: true }).click();
   });

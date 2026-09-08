@@ -66,20 +66,53 @@ button {
 .topbar {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  min-height: 52px;
+  gap: 8px;
+  padding: 6px 12px;
+  min-height: 48px;
   border-bottom: 1px solid var(--line);
   flex: none;
 }
 
 .topbar h1 {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 650;
   letter-spacing: -0.01em;
   margin: 0;
   flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
+
+/* Primary action lives here rather than in a bar of its own, which buys the
+   preview a whole row of height. */
+.topbar-cta {
+  flex: none;
+  min-height: 38px;
+  padding: 0 16px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  color: #fff;
+  font-size: 14px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+.topbar-cta:active { filter: brightness(0.92); }
+.topbar-cta:disabled { opacity: 0.45; }
+
+.icon-only {
+  flex: none;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: var(--bg-input);
+  color: var(--text-dim);
+  font-size: 17px;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+}
+.icon-only:active { background: var(--line); }
 
 .brandmark {
   width: 26px;
@@ -157,11 +190,69 @@ button {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 12px;
+  padding: 10px;
   background:
     repeating-conic-gradient(#101018 0% 25%, #0c0c12 0% 50%) 50% / 22px 22px;
   position: relative;
 }
+
+/* Controls floated over the preview cost no layout height, which is the point:
+   the GIF should own the screen. */
+.stage-btn {
+  position: absolute;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: rgba(10, 10, 16, 0.62);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #fff;
+  font-size: 15px;
+  display: grid;
+  place-items: center;
+  z-index: 3;
+}
+.stage-btn:active { background: rgba(10, 10, 16, 0.85); }
+.stage-btn-expand { top: 10px; right: 10px; }
+
+.stage-meta {
+  position: absolute;
+  left: 10px;
+  bottom: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.55);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+  pointer-events: none;
+  z-index: 2;
+  padding-right: 56px;
+}
+.stage-meta .warn { color: var(--danger); }
+
+/* Immersive mode keeps only the transport, floated at the bottom. */
+.stage-transport {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: calc(10px + var(--safe-bottom));
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px 6px 6px;
+  border-radius: 999px;
+  background: rgba(10, 10, 16, 0.62);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  z-index: 3;
+}
+
+.app.immersive .stage { padding: 0; }
+.app.immersive .stage-meta { bottom: calc(64px + var(--safe-bottom)); }
 
 /* Deliberately not `overflow: hidden`: edit handles sit on the corners of the
    frame and must stay grabbable. The canvas carries the rounding instead. */
@@ -227,7 +318,7 @@ button {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px 14px;
+  padding: 2px 14px;
   flex: none;
   border-top: 1px solid var(--line);
 }
@@ -241,36 +332,30 @@ button {
   flex: none;
 }
 .play-btn:active { background: var(--line); }
+.stage-transport .play-btn { background: rgba(255, 255, 255, 0.14); color: #fff; }
 
 .scrub {
   flex: 1;
   min-width: 0;
 }
 
-.meta-row {
-  display: flex;
-  gap: 8px;
-  font-size: 11px;
-  color: var(--text-faint);
-  padding: 0 14px 6px;
-  flex-wrap: wrap;
+.transport-time {
   flex: none;
+  font-size: 12px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  min-width: 78px;
+  text-align: right;
 }
-.meta-row .chip {
-  background: var(--bg-raised);
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 3px 9px;
-  white-space: nowrap;
-}
-.meta-row .chip strong { font-weight: 600; color: var(--text-dim); }
+.stage-transport .transport-time { color: rgba(255, 255, 255, 0.75); }
 
 /* ----------------------------------------------------------------- tools */
 .tool-panel {
   flex: none;
-  height: 38vh;
-  min-height: 210px;
-  max-height: 380px;
+  /* Smaller than before on purpose: the preview gets the reclaimed height. */
+  height: 30vh;
+  min-height: 168px;
+  max-height: 300px;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   border-top: 1px solid var(--line);
@@ -299,13 +384,6 @@ button {
 .tab .tab-icon { font-size: 18px; line-height: 1; }
 .tab.active { color: var(--accent); }
 .tab.active .tab-icon { transform: translateY(-1px); }
-
-.cta-bar {
-  flex: none;
-  padding: 10px 14px;
-  border-top: 1px solid var(--line);
-  background: var(--bg-raised);
-}
 
 .cta {
   width: 100%;
@@ -734,7 +812,7 @@ input[type='color'] {
 .emoji-grid button:active { background: var(--line); }
 
 @media (min-height: 780px) {
-  .tool-panel { height: 34vh; }
+  .tool-panel { height: 28vh; }
 }
 
 /* Landscape on a phone leaves almost no vertical room, so give the preview the
@@ -745,7 +823,6 @@ input[type='color'] {
   .tabs .tab { min-height: 46px; font-size: 9px; padding: 6px 2px; }
   .tab .tab-icon { font-size: 15px; }
   .cta { min-height: 42px; font-size: 15px; }
-  .cta-bar { padding: 6px 14px; }
-  .transport { padding: 4px 14px; }
-  .meta-row { padding-bottom: 3px; }
+  .transport { padding: 2px 14px; }
+  .stage-meta { display: none; }
 }

@@ -152,6 +152,13 @@ resolution and where the source pixels come from:
 The preview canvas is capped at a 640px long edge. Every element of the render is
 proportional to canvas size, so it stays a faithful scaled copy.
 
+**Trimming does not rebuild the cache.** Dragging a trim handle shows the exact
+frame under it, decoded straight from the video with latest-wins seeking (a new
+target replaces the pending one rather than queueing behind it). The cache only
+covers the *current* trim range, so it could not show where a new trim point
+lands anyway. Rebuilding is deferred until playback actually needs it — otherwise
+every nudge of a handle blocks on a decode pass and fine-tuning is impossible.
+
 ### Encoding
 
 [`src/export/gifCore.ts`](src/export/gifCore.ts) implements a streaming writer on
@@ -301,10 +308,16 @@ These are properties of the platform, handled explicitly rather than hidden:
   seeking and export almost instantly. There is a **Cancel** button throughout.
 - **Web Share** needs a secure context and a browser that accepts files. The
   download and long-press paths are always available.
-- **Nothing is persisted but preferences.** Frame rate, quality, dimensions,
-  framing mode, background, direction, speed and default photo duration are kept
-  in `localStorage`. Imported media is held in memory for the session and
-  released on "Start over" or when the tab closes.
+- **Nothing is persisted but preferences.** Frame rate, quality, output
+  dimensions, framing mode, background and the default photo duration are kept in
+  `localStorage`. Per-clip *edits* — trim, direction, speed, crop, stickers,
+  censor regions — deliberately are not, so every new project starts clean.
+  Imported media is held in memory for the session and released on "Start over"
+  or when the tab closes.
+- **Full screen is an in-app mode, not the Fullscreen API.** iOS Safari only
+  grants native fullscreen to `<video>` elements, so the expand button hides
+  every piece of chrome instead. That behaves identically in the installed PWA,
+  where there is no browser UI to escape anyway.
 
 ---
 

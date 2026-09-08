@@ -8,12 +8,12 @@ test.describe('Photo workflow', () => {
     await openApp(page);
     await importPhotos(page);
 
-    await openTab(page, 'Timing');
+    await openTab(page, 'Edit');
     const strip = page.locator('.strip-item');
     await expect(strip).toHaveCount(3);
 
     // Default is 0.6s each -> 1.8s total.
-    await expect(page.locator('.meta-row')).toContainText('1.8s');
+    await expect(page.locator('.stage-meta')).toContainText('1.8s');
 
     // Reorder: move the first photo one place later and confirm the strip order
     // changed (thumbnail 1 becomes thumbnail 2).
@@ -32,12 +32,12 @@ test.describe('Photo workflow', () => {
     await strip.nth(0).click();
     await page.getByRole('slider', { name: 'Duration of photo 1' }).fill('2000');
     await expect(page.locator('.strip-item').nth(0)).toContainText('2.00s');
-    await expect(page.locator('.meta-row')).toContainText('3.2s');
+    await expect(page.locator('.stage-meta')).toContainText('3.2s');
 
-    // "Set every photo" applies one duration to all of them.
-    await page.getByRole('slider', { name: 'Duration for every photo' }).fill('500');
-    await page.getByRole('button', { name: 'Apply to all' }).click();
-    await expect(page.locator('.meta-row')).toContainText('1.5s');
+    // "Apply to all" pushes the selected photo's duration onto every photo.
+    await page.getByRole('slider', { name: 'Duration of photo 1' }).fill('500');
+    await page.getByRole('button', { name: 'Apply this duration to every photo' }).click();
+    await expect(page.locator('.stage-meta')).toContainText('1.5s');
 
     await generate(page);
     const gif = probeGif(await readResultGif(page));
@@ -59,13 +59,13 @@ test.describe('Photo workflow', () => {
   test('per-photo durations survive into the encoded frame delays', async ({ page }) => {
     await openApp(page);
     await importPhotos(page, PHOTOS.slice(0, 2));
-    await openTab(page, 'Timing');
+    await openTab(page, 'Edit');
 
     await page.locator('.strip-item').nth(0).click();
     await page.getByRole('slider', { name: 'Duration of photo 1' }).fill('1500');
     await page.locator('.strip-item').nth(1).click();
     await page.getByRole('slider', { name: 'Duration of photo 2' }).fill('300');
-    await expect(page.locator('.meta-row')).toContainText('1.8s');
+    await expect(page.locator('.stage-meta')).toContainText('1.8s');
 
     await generate(page);
     const bytes = await readResultGif(page);

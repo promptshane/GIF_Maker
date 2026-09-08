@@ -47,7 +47,7 @@ import { renderPaletteSamples, type RenderSettings } from '../export/renderPipel
 import { uid } from '../lib/format';
 
 export type Step = 'import' | 'edit' | 'export';
-export type EditTool = 'canvas' | 'timing' | 'motion' | 'stickers' | 'censor';
+export type EditTool = 'timing' | 'stickers' | 'censor' | 'canvas';
 
 export interface AppError {
   message: string;
@@ -75,6 +75,21 @@ interface AppState {
   crop: CropRect;
   videoSettings: VideoSettings;
   fps: number;
+
+  /**
+   * Source timestamp being scrubbed to while a trim grip is dragged. The
+   * preview shows this exact frame, decoded from the video rather than from the
+   * frame cache, so you can see precisely where a trim lands.
+   */
+  trimScrub: number | null;
+  /**
+   * The trim moved but the preview frame cache has not been rebuilt yet.
+   * Rebuilding is deferred until playback actually needs it — rebuilding on
+   * every trim adjustment makes fine-tuning impossible.
+   */
+  cacheStale: boolean;
+  /** Preview fills the screen, hiding all editing chrome. */
+  immersive: boolean;
 
   stickers: Sticker[];
   censors: CensorRegion[];
@@ -114,6 +129,8 @@ interface AppState {
   resetCrop: () => void;
 
   setTrim: (start: number, end: number) => void;
+  setTrimScrub: (time: number | null) => void;
+  setImmersive: (immersive: boolean) => void;
   setDirection: (direction: Direction) => void;
   setSpeed: (speed: number) => void;
   setFps: (fps: number) => void;
@@ -149,11 +166,28 @@ const initialCanvas = (): CanvasSettings => ({
   background: prefs.background,
 });
 
+/**
+ * Per-clip edits, as they should look for a brand-new project. Preferences
+ * (output size, frame rate, quality) deliberately survive; edits do not.
+ */
+const freshEdits = () => ({
+  crop: { ...FULL_CROP },
+  stickers: [] as Sticker[],
+  censors: [] as CensorRegion[],
+  selectedOverlayId: null,
+  videoSettings: { trimStart: 0, trimEnd: 0, direction: 'forward' as const, speed: 1 },
+  trimScrub: null,
+  cacheStale: false,
+  result: null,
+  estimate: null,
+  tool: 'timing' as EditTool,
+});
+
 const initialVideoSettings = (): VideoSettings => ({
   trimStart: 0,
   trimEnd: 0,
-  direction: prefs.direction,
-  speed: prefs.speed,
+  direction: 'forward',
+  speed: 1,
 });
 
 /** Output size implied by a preset, given the source's own dimensions. */
@@ -271,7 +305,7 @@ export const useStore = create<AppState>()((set, get) => {
 
   return {
     step: 'import',
-    tool: 'canvas',
+    tool: 'timing',
     kind: null,
     photos: [],
     video: null,
@@ -282,6 +316,9 @@ export const useStore = create<AppState>()((set, get) => {
     crop: { ...FULL_CROP },
     videoSettings: initialVideoSettings(),
     fps: prefs.fps,
+    trimScrub: null,
+    cacheStale: false,
+    immersive: false,
     stickers: [],
     censors: [],
     selectedOverlayId: null,
@@ -354,6 +391,9 @@ export const useStore = create<AppState>()((set, get) => {
             : presetDimensions(canvas.preset, photos[0].width, photos[0].height, canvas);
 
         set({
+          // Appending to an existing project keeps its edits; starting a new
+          // one discards them, so a previous GIF never bleeds into the next.
+          ...(existing.length > 0 ? { result: null, estimate: null } : freshEdits()),
           kind: 'photos',
           photos,
           video: null,
@@ -363,8 +403,6 @@ export const useStore = create<AppState>()((set, get) => {
           canvas: { ...canvas, ...size },
           step: 'edit',
           busy: null,
-          result: null,
-          estimate: null,
           error:
             failures.length > 0
               ? {
@@ -400,6 +438,7 @@ export const useStore = create<AppState>()((set, get) => {
         const size = presetDimensions(canvas.preset, reader.width, reader.height, canvas);
 
         set({
+          ...freshEdits(),
           kind: 'video',
           video: {
             id: uid(),
@@ -412,9 +451,7 @@ export const useStore = create<AppState>()((set, get) => {
           },
           reader,
           canvas: { ...canvas, ...size },
-          videoSettings: { ...get().videoSettings, trimStart: 0, trimEnd },
-          stickers: [],
-          censors: [],
+          videoSettings: { trimStart: 0, trimEnd, direction: 'forward', speed: 1 },
           step: 'edit',
           busy: null,
           error:
@@ -437,7 +474,6 @@ export const useStore = create<AppState>()((set, get) => {
       const fresh = loadPrefs();
       set({
         step: 'import',
-        tool: 'canvas',
         kind: null,
         photos: [],
         video: null,
@@ -452,18 +488,13 @@ export const useStore = create<AppState>()((set, get) => {
           fitMode: fresh.fitMode,
           background: fresh.background,
         },
-        crop: { ...FULL_CROP },
-        videoSettings: { trimStart: 0, trimEnd: 0, direction: fresh.direction, speed: fresh.speed },
+        ...freshEdits(),
         fps: fresh.fps,
-        stickers: [],
-        censors: [],
-        selectedOverlayId: null,
         quality: fresh.quality,
-        estimate: null,
         estimating: false,
         exporting: false,
         progress: null,
-        result: null,
+        immersive: false,
         busy: null,
         error: null,
       });
@@ -592,22 +623,29 @@ export const useStore = create<AppState>()((set, get) => {
       const duration = state.video.duration;
       const nextStart = clamp(start, 0, Math.max(0, duration - 0.05));
       const nextEnd = clamp(end, nextStart + 0.05, duration);
+      const cached = state.cachedRange;
+      const matchesCache =
+        cached !== null &&
+        Math.abs(cached.start - nextStart) < 0.02 &&
+        Math.abs(cached.end - nextEnd) < 0.02;
       set({
         videoSettings: { ...state.videoSettings, trimStart: nextStart, trimEnd: nextEnd },
+        // Defer the rebuild: it happens when playback next needs it.
+        cacheStale: !matchesCache,
         result: null,
         estimate: null,
       });
     },
 
-    setDirection: (direction) => {
-      savePrefs({ direction });
-      set({ videoSettings: { ...get().videoSettings, direction }, result: null, estimate: null });
-    },
+    setTrimScrub: (time) => set({ trimScrub: time }),
 
-    setSpeed: (speed) => {
-      savePrefs({ speed });
-      set({ videoSettings: { ...get().videoSettings, speed }, result: null, estimate: null });
-    },
+    setImmersive: (immersive) => set({ immersive }),
+
+    setDirection: (direction) =>
+      set({ videoSettings: { ...get().videoSettings, direction }, result: null, estimate: null }),
+
+    setSpeed: (speed) =>
+      set({ videoSettings: { ...get().videoSettings, speed }, result: null, estimate: null }),
 
     setFps: (fps) => {
       savePrefs({ fps });
@@ -749,6 +787,7 @@ export const useStore = create<AppState>()((set, get) => {
       const { trimStart, trimEnd } = state.videoSettings;
       const cached = state.cachedRange;
       if (cached && Math.abs(cached.start - trimStart) < 0.02 && Math.abs(cached.end - trimEnd) < 0.02) {
+        set({ cacheStale: false });
         return;
       }
 
@@ -763,6 +802,8 @@ export const useStore = create<AppState>()((set, get) => {
         set({
           previewCache: cache,
           cachedRange: { start: trimStart, end: trimEnd },
+          cacheStale: false,
+          trimScrub: null,
           busy: null,
         });
       } catch (error) {

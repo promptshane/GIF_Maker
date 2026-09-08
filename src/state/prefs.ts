@@ -1,11 +1,17 @@
-import type { CanvasPreset, Direction, FitMode, QualityLevel } from './types';
+import type { CanvasPreset, FitMode, QualityLevel } from './types';
 
 const KEY = 'gifmaker.prefs.v1';
 
 /**
- * Lightweight, non-sensitive preferences only. Imported photos and videos are
- * never persisted — they live in memory for the session and are released when
- * the project is cleared or the tab closes.
+ * Lightweight, non-sensitive preferences only.
+ *
+ * These are *settings* that should carry between projects (output size, frame
+ * rate, quality). Anything that is an edit to a particular clip — trim,
+ * direction, speed, crop, stickers, censor regions — deliberately lives outside
+ * this, so every new import starts clean.
+ *
+ * Imported photos and videos are never persisted: they live in memory for the
+ * session and are released when the project is cleared or the tab closes.
  */
 export interface Prefs {
   fps: number;
@@ -15,8 +21,6 @@ export interface Prefs {
   height: number;
   fitMode: FitMode;
   background: string;
-  direction: Direction;
-  speed: number;
   photoDurationMs: number;
 }
 
@@ -28,8 +32,6 @@ export const DEFAULT_PREFS: Prefs = {
   height: 480,
   fitMode: 'fill',
   background: '#000000',
-  direction: 'forward',
-  speed: 1,
   photoDurationMs: 600,
 };
 

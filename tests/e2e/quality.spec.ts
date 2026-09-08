@@ -12,7 +12,7 @@ test.describe('Export quality', () => {
   test('each preset produces a genuinely different file, in size order', async ({ page }) => {
     await openApp(page);
     await importVideo(page);
-    await openTab(page, 'Timing');
+    await openTab(page, 'Edit');
     await page.getByRole('button', { name: '10', exact: true }).click();
 
     const results: Array<{ label: string; bytes: number; frames: number; w: number; h: number }> = [];
@@ -71,7 +71,7 @@ test.describe('Export quality', () => {
   test('the pre-encode estimate lands near the real size', async ({ page }) => {
     await openApp(page);
     await importVideo(page);
-    await openTab(page, 'Timing');
+    await openTab(page, 'Edit');
     await page.getByRole('button', { name: '10', exact: true }).click();
 
     await page.getByRole('button', { name: 'Export GIF' }).click();

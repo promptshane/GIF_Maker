@@ -37,11 +37,14 @@ test.describe('Mobile layout', () => {
       expect(box.height).toBeGreaterThanOrEqual(44);
       expect(box.width).toBeGreaterThanOrEqual(44);
     }
-    const cta = (await page.locator('.cta').boundingBox())!;
-    expect(cta.height).toBeGreaterThanOrEqual(44);
+    // The primary action now lives in the top bar, freeing a row for the preview.
+    const cta = (await page.locator('.topbar-cta').boundingBox())!;
+    expect(cta.height).toBeGreaterThanOrEqual(36);
+    const startOver = (await page.getByLabel('Start over').boundingBox())!;
+    expect(startOver.width).toBeGreaterThanOrEqual(36);
 
     // Every tool panel renders without overflowing.
-    for (const tab of ['Frame', 'Timing', 'Emoji', 'Censor']) {
+    for (const tab of ['Edit', 'Emoji', 'Censor', 'Frame']) {
       await openTab(page, tab);
       await expectNoHorizontalOverflow(page);
       await expect(page.locator('.tool-panel')).toBeVisible();
@@ -77,7 +80,7 @@ test.describe('Mobile layout', () => {
   test('video editing fits the phone viewport too', async ({ page }) => {
     await openApp(page);
     await importVideo(page);
-    await openTab(page, 'Timing');
+    await openTab(page, 'Edit');
     await expectNoHorizontalOverflow(page);
     await expect(page.locator('.trim-rail')).toBeVisible();
     const grips = await page.locator('.trim-grip').all();

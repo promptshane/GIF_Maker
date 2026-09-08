@@ -4,6 +4,7 @@ import type { FramePlan } from '../render/timeline';
 import { frameIndexAt } from '../render/timeline';
 import { Compositor, composeFrame } from '../render/compose';
 import type { RenderSettings } from '../export/renderPipeline';
+import type { FrameImage } from '../media/frames';
 
 /**
  * Preview rendering is capped at this long edge. The compositor work (censor
@@ -27,10 +28,20 @@ export interface PreviewPlayer {
   size: { width: number; height: number };
 }
 
+/**
+ * An image to show instead of the timeline's own frame — used while scrubbing a
+ * trim handle, where the point is to see a specific source frame.
+ */
+export interface PreviewOverride {
+  frame: FrameImage | null;
+  revision: number;
+}
+
 export function usePreviewPlayer(
   plan: FramePlan,
   settings: RenderSettings,
   provider: FrameProvider | null,
+  override?: PreviewOverride,
 ): PreviewPlayer {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const compositorRef = useRef<Compositor | null>(null);
@@ -42,11 +53,13 @@ export function usePreviewPlayer(
   const settingsRef = useRef(settings);
   const providerRef = useRef(provider);
   const playingRef = useRef(playing);
+  const overrideRef = useRef<PreviewOverride | undefined>(override);
   const timeRef = useRef(0);
   planRef.current = plan;
   settingsRef.current = settings;
   providerRef.current = provider;
   playingRef.current = playing;
+  overrideRef.current = override;
 
   const scale = Math.min(
     1,
@@ -81,7 +94,8 @@ export function usePreviewPlayer(
 
     const index = frameIndexAt(currentPlan, atMs);
     const frame = index >= 0 ? currentPlan.frames[index] : null;
-    const image = frame ? providerRef.current?.getSync?.(frame.source) ?? null : null;
+    const scrubbed = overrideRef.current?.frame ?? null;
+    const image = scrubbed ?? (frame ? providerRef.current?.getSync?.(frame.source) ?? null : null);
 
     composeFrame(compositor, {
       ctx,
@@ -112,10 +126,11 @@ export function usePreviewPlayer(
     draw(timeRef.current);
   }, [width, height, draw]);
 
-  // Repaint when anything that affects the image changes while paused.
+  // Repaint when anything that affects the image changes while paused, and
+  // whenever a newly decoded scrub frame arrives.
   useEffect(() => {
     if (!playingRef.current) draw(timeRef.current);
-  }, [draw, settings, plan, provider]);
+  }, [draw, settings, plan, provider, override?.revision, override?.frame]);
 
   useEffect(() => {
     let raf = 0;
