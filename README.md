@@ -261,6 +261,12 @@ These are properties of the platform, handled explicitly rather than hidden:
   capped at 2048px, presets cap at 720px, and timelines are capped at 1500
   frames — when a timeline is cut short the UI says so rather than silently
   dropping the end.
+- **Video exports are seek-bound, not encode-bound.** Reading a frame means
+  seeking the `<video>` element, which the browser does at its own pace — on a
+  desktop that is roughly 130ms per frame against ~35ms to encode one. A
+  120-frame export therefore takes tens of seconds, more on a phone, and the
+  progress bar counts real frames so you can see where it is. Photo GIFs have no
+  seeking and export almost instantly. There is a **Cancel** button throughout.
 - **Web Share** needs a secure context and a browser that accepts files. The
   download and long-press paths are always available.
 - **Nothing is persisted but preferences.** Frame rate, quality, dimensions,
