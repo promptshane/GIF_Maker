@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Field, Segmented } from '../common';
 import { useStore } from '../../state/store';
 import type { Direction } from '../../state/types';
@@ -8,12 +8,17 @@ import { useGesture } from '../gestures';
 import { clamp } from '../../render/geometry';
 
 const FPS_OPTIONS = [10, 15, 20, 24, 30, 60];
-const SPEEDS = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4];
+const MIN_SPEED = 0.25;
+const MAX_SPEED = 4;
+const SPEED_STEP = 0.01;
 const DIRECTIONS: Array<{ value: Direction; label: string }> = [
   { value: 'forward', label: 'Forward' },
   { value: 'reverse', label: 'Reverse' },
   { value: 'boomerang', label: 'Boomerang' },
 ];
+
+const formatSpeed = (speed: number): string => speed.toFixed(3).replace(/\.?0+$/, '');
+const normaliseSpeed = (speed: number): number => clamp(speed, MIN_SPEED, MAX_SPEED);
 
 export function TimingPanel() {
   const kind = useStore((state) => state.kind);
@@ -104,22 +109,68 @@ function VideoTiming() {
         )}
       </Field>
 
-      <Field label="Speed" value={`${settings.speed}×`}>
-        <div className="chips">
-          {SPEEDS.map((speed) => (
-            <button
-              key={speed}
-              type="button"
-              className="chip-btn"
-              aria-pressed={settings.speed === speed}
-              onClick={() => setSpeed(speed)}
-            >
-              {speed}×
-            </button>
-          ))}
+      <Field label="Speed" value={`${formatSpeed(settings.speed)}×`}>
+        <input
+          type="range"
+          min={MIN_SPEED}
+          max={MAX_SPEED}
+          step={SPEED_STEP}
+          value={settings.speed}
+          aria-label="Playback speed"
+          onChange={(event) => setSpeed(Number(event.target.value))}
+        />
+        <div
+          className="row"
+          style={{ alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 2 }}
+        >
+          <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>{MIN_SPEED}×</span>
+          <SpeedNumberInput speed={settings.speed} onChange={setSpeed} />
+          <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>{MAX_SPEED}×</span>
         </div>
       </Field>
     </>
+  );
+}
+
+function SpeedNumberInput({ speed, onChange }: { speed: number; onChange: (speed: number) => void }) {
+  const [draft, setDraft] = useState(formatSpeed(speed));
+
+  useEffect(() => {
+    setDraft(formatSpeed(speed));
+  }, [speed]);
+
+  const commit = (): void => {
+    const parsed = Number(draft);
+    if (!Number.isFinite(parsed)) {
+      setDraft(formatSpeed(speed));
+      return;
+    }
+    const next = normaliseSpeed(parsed);
+    setDraft(formatSpeed(next));
+    if (next !== speed) onChange(next);
+  };
+
+  return (
+    <label
+      style={{ display: 'flex', alignItems: 'center', gap: 6, flex: '0 1 130px', minWidth: 0 }}
+    >
+      <input
+        type="number"
+        min={MIN_SPEED}
+        max={MAX_SPEED}
+        step="any"
+        inputMode="decimal"
+        value={draft}
+        aria-label="Exact playback speed"
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') event.currentTarget.blur();
+        }}
+        style={{ minWidth: 0, textAlign: 'right' }}
+      />
+      <span style={{ color: 'var(--text-dim)' }}>×</span>
+    </label>
   );
 }
 
