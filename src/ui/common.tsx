@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 
 export function Field({
   label,
@@ -74,6 +74,75 @@ export function Switch({
         onClick={() => onChange(!checked)}
       />
     </div>
+  );
+}
+
+/**
+ * A button that fires once per tap and keeps firing while held, for nudge and
+ * stepper controls where a run of a dozen taps would be tedious on a phone.
+ *
+ * The tap itself is delivered through `click` so keyboards work unchanged;
+ * holding starts a repeat timer from `pointerdown`, and the click that follows
+ * the release is swallowed so a hold never fires one extra step at the end.
+ */
+export function RepeatButton({
+  onPress,
+  className,
+  label,
+  children,
+  delayMs = 350,
+  intervalMs = 70,
+}: {
+  onPress: () => void;
+  className?: string;
+  label: string;
+  children: ReactNode;
+  delayMs?: number;
+  intervalMs?: number;
+}) {
+  const pressRef = useRef(onPress);
+  pressRef.current = onPress;
+  const timers = useRef<{ delay: number | null; interval: number | null }>({
+    delay: null,
+    interval: null,
+  });
+  const repeated = useRef(false);
+
+  const stop = () => {
+    if (timers.current.delay !== null) window.clearTimeout(timers.current.delay);
+    if (timers.current.interval !== null) window.clearInterval(timers.current.interval);
+    timers.current = { delay: null, interval: null };
+  };
+  useEffect(() => stop, []);
+
+  return (
+    <button
+      type="button"
+      className={className}
+      aria-label={label}
+      onPointerDown={(event) => {
+        if (event.pointerType === 'mouse' && event.button !== 0) return;
+        stop();
+        repeated.current = false;
+        timers.current.delay = window.setTimeout(() => {
+          repeated.current = true;
+          pressRef.current();
+          timers.current.interval = window.setInterval(() => pressRef.current(), intervalMs);
+        }, delayMs);
+      }}
+      onPointerUp={stop}
+      onPointerCancel={stop}
+      onPointerLeave={stop}
+      onClick={() => {
+        if (repeated.current) {
+          repeated.current = false;
+          return;
+        }
+        pressRef.current();
+      }}
+    >
+      {children}
+    </button>
   );
 }
 

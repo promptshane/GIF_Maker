@@ -26,7 +26,7 @@ test.describe('New projects start clean', () => {
     );
 
     await page.getByLabel('Start over').click();
-    await expect(page.getByRole('heading', { name: 'Make a GIF' })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 2, name: 'GIF Maker' })).toBeVisible();
     await importVideo(page);
 
     // Direction and speed are per-clip edits, not remembered preferences.

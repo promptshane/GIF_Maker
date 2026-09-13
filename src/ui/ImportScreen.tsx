@@ -10,7 +10,7 @@ export function ImportScreen() {
   return (
     <div className="import">
       <div className="import-hero">
-        <h2>Make a GIF</h2>
+        <h2>GIF Maker</h2>
         <p>From photos or a video clip. Everything happens on your device.</p>
       </div>
 

@@ -4,7 +4,6 @@ import { useStore } from '../state/store';
 import { useFramePlan } from '../state/hooks';
 import { QUALITY_ORDER, QUALITY_PROFILES } from '../export/quality';
 import { formatBytes, formatBytesShort, formatDuration } from '../lib/format';
-import { MAX_GIF_FPS } from '../render/timeline';
 
 type ShareState = { kind: 'idle' } | { kind: 'error'; message: string } | { kind: 'saved' };
 
@@ -170,8 +169,6 @@ export function ExportSheet({ open, onClose }: { open: boolean; onClose: () => v
           <div className="hint">
             Quality changes colours and compression only. Your size, frame rate, duration and crop
             stay exactly as you set them.
-            {plan.requestedFps > MAX_GIF_FPS &&
-              ` Frames are sampled at ${MAX_GIF_FPS} FPS, the fastest a GIF can play.`}
           </div>
 
           <div style={{ marginTop: 14 }}>

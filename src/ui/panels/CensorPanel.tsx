@@ -1,7 +1,8 @@
-import { Field, Segmented } from '../common';
+import { Field, RepeatButton, Segmented } from '../common';
 import { useStore } from '../../state/store';
 import { TimeRangeField } from './TimeRangeField';
 import { censorRectAt } from '../../render/timeline';
+import { clamp } from '../../render/geometry';
 import { formatDuration } from '../../lib/format';
 import type { CensorEffect, CensorShape } from '../../state/types';
 
@@ -14,6 +15,11 @@ const SHAPES: Array<{ value: CensorShape; label: string }> = [
   { value: 'rect', label: 'Rectangle' },
   { value: 'circle', label: 'Circle' },
 ];
+
+/** One nudge or step, as a fraction of the canvas: ~5px on a 480px output. */
+const STEP = 0.01;
+const MIN_SIZE = 0.02;
+const MAX_SIZE = 1.5;
 
 export function CensorPanel({
   playheadMs,
@@ -34,6 +40,24 @@ export function CensorPanel({
 
   const selected = censors.find((region) => region.id === selectedId) ?? null;
   const rect = selected ? censorRectAt(selected, playheadMs) : null;
+
+  const nudge = (dx: number, dy: number) => {
+    if (!selected || !rect) return;
+    setCensorRect(selected.id, playheadMs, {
+      ...rect,
+      x: clamp(rect.x + dx, 0, 1),
+      y: clamp(rect.y + dy, 0, 1),
+    });
+  };
+
+  const resize = (patch: { w?: number; h?: number }) => {
+    if (!selected || !rect) return;
+    setCensorRect(selected.id, playheadMs, {
+      ...rect,
+      w: clamp(patch.w ?? rect.w, MIN_SIZE, MAX_SIZE),
+      h: clamp(patch.h ?? rect.h, MIN_SIZE, MAX_SIZE),
+    });
+  };
 
   return (
     <>
@@ -84,6 +108,21 @@ export function CensorPanel({
               </div>
             </div>
           ))}
+          {selected ? (
+            <button
+              type="button"
+              className="ghost-btn"
+              style={{ width: '100%', minHeight: 40 }}
+              onClick={() => selectOverlay(null)}
+            >
+              Deselect to preview the result
+            </button>
+          ) : (
+            <div className="hint" style={{ marginTop: 0 }}>
+              Showing the finished result. Tap a region on the preview, or one in this list, to
+              edit it.
+            </div>
+          )}
         </Field>
       )}
 
@@ -120,33 +159,81 @@ export function CensorPanel({
             />
           </Field>
 
+          <Field
+            label="Position"
+            value={`${Math.round(rect.x * 100)}%, ${Math.round(rect.y * 100)}%`}
+          >
+            <div className="nudge-pad">
+              <RepeatButton className="step-btn" label="Nudge left" onPress={() => nudge(-STEP, 0)}>
+                ←
+              </RepeatButton>
+              <div className="nudge-stack">
+                <RepeatButton className="step-btn" label="Nudge up" onPress={() => nudge(0, -STEP)}>
+                  ↑
+                </RepeatButton>
+                <RepeatButton className="step-btn" label="Nudge down" onPress={() => nudge(0, STEP)}>
+                  ↓
+                </RepeatButton>
+              </div>
+              <RepeatButton className="step-btn" label="Nudge right" onPress={() => nudge(STEP, 0)}>
+                →
+              </RepeatButton>
+              <div className="hint nudge-hint">
+                Tap to move the region 1% at a time, or hold to keep moving. Drag it on the preview
+                for big moves.
+              </div>
+            </div>
+          </Field>
+
           <Field label="Size" value={`${Math.round(rect.w * 100)}% × ${Math.round(rect.h * 100)}%`}>
-            <input
-              type="range"
-              min={2}
-              max={150}
-              value={Math.round(rect.w * 100)}
-              aria-label="Censor width"
-              onChange={(event) =>
-                setCensorRect(selected.id, playheadMs, {
-                  ...rect,
-                  w: Number(event.target.value) / 100,
-                })
-              }
-            />
-            <input
-              type="range"
-              min={2}
-              max={150}
-              value={Math.round(rect.h * 100)}
-              aria-label="Censor height"
-              onChange={(event) =>
-                setCensorRect(selected.id, playheadMs, {
-                  ...rect,
-                  h: Number(event.target.value) / 100,
-                })
-              }
-            />
+            <div className="stepper-row">
+              <RepeatButton
+                className="step-btn"
+                label="Narrower"
+                onPress={() => resize({ w: rect.w - STEP })}
+              >
+                −
+              </RepeatButton>
+              <input
+                type="range"
+                min={2}
+                max={150}
+                value={Math.round(rect.w * 100)}
+                aria-label="Censor width"
+                onChange={(event) => resize({ w: Number(event.target.value) / 100 })}
+              />
+              <RepeatButton
+                className="step-btn"
+                label="Wider"
+                onPress={() => resize({ w: rect.w + STEP })}
+              >
+                +
+              </RepeatButton>
+            </div>
+            <div className="stepper-row">
+              <RepeatButton
+                className="step-btn"
+                label="Shorter"
+                onPress={() => resize({ h: rect.h - STEP })}
+              >
+                −
+              </RepeatButton>
+              <input
+                type="range"
+                min={2}
+                max={150}
+                value={Math.round(rect.h * 100)}
+                aria-label="Censor height"
+                onChange={(event) => resize({ h: Number(event.target.value) / 100 })}
+              />
+              <RepeatButton
+                className="step-btn"
+                label="Taller"
+                onPress={() => resize({ h: rect.h + STEP })}
+              >
+                +
+              </RepeatButton>
+            </div>
           </Field>
 
           <Field label="Follow movement" value={`${selected.keyframes.length} keyframe${selected.keyframes.length === 1 ? '' : 's'}`}>

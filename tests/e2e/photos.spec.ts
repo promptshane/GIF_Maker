@@ -91,6 +91,6 @@ test.describe('Photo workflow', () => {
     });
     await expect(page.getByRole('alert')).toContainText('could not be opened');
     // And it does not silently move on to the editor.
-    await expect(page.getByRole('heading', { name: 'Make a GIF' })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 2, name: 'GIF Maker' })).toBeVisible();
   });
 });

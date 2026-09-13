@@ -536,6 +536,42 @@ input[type='color'] {
 
 .hint { color: var(--text-faint); font-size: 12px; line-height: 1.5; margin-top: 8px; }
 
+/* Nudge pad and ± steppers: fixed-size tap targets that repeat while held,
+   so they must never trigger the long-press callout or text selection. */
+.step-btn {
+  flex: none;
+  width: var(--tap);
+  height: var(--tap);
+  border-radius: 10px;
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: 18px;
+  display: grid;
+  place-items: center;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: manipulation;
+}
+.step-btn:active { background: var(--line); }
+
+.nudge-pad {
+  display: grid;
+  grid-template-columns: auto auto auto 1fr;
+  grid-template-rows: auto;
+  align-items: center;
+  gap: 6px 8px;
+}
+.nudge-stack { display: flex; flex-direction: column; gap: 6px; }
+.nudge-pad .nudge-hint { margin-top: 0; }
+
+.stepper-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.stepper-row input[type='range'] { flex: 1; min-width: 0; }
+
 /* ------------------------------------------------------------ photo strip */
 .strip {
   display: flex;

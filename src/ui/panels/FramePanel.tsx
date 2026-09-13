@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { Field, Segmented, Switch } from '../common';
 import { useStore } from '../../state/store';
 import type { CanvasPreset, FitMode } from '../../state/types';
@@ -19,7 +20,7 @@ const FITS: Array<{ value: FitMode; label: string }> = [
 const FIT_HINTS: Record<FitMode, string> = {
   fit: 'The whole image is visible. Empty space uses the background colour.',
   fill: 'Scaled up to fill the frame and centre-cropped automatically.',
-  crop: 'You choose the area. Tap “Reframe” to drag and pinch it on the image.',
+  crop: 'You choose the area. Tap “Reframe on image”, then drag it, pinch it, or pull any corner.',
 };
 
 export function FramePanel({
@@ -50,24 +51,16 @@ export function FramePanel({
 
       <Field label="Width / height">
         <div className="row">
-          <input
-            type="number"
-            inputMode="numeric"
-            aria-label="Output width"
-            min={16}
-            max={2048}
+          <DimensionInput
+            label="Output width"
             value={canvas.width}
-            onChange={(event) => setCanvasSize(Number(event.target.value), canvas.height, 'width')}
+            onCommit={(width) => setCanvasSize(width, canvas.height, 'width')}
           />
           <span style={{ color: 'var(--text-faint)' }}>×</span>
-          <input
-            type="number"
-            inputMode="numeric"
-            aria-label="Output height"
-            min={16}
-            max={2048}
+          <DimensionInput
+            label="Output height"
             value={canvas.height}
-            onChange={(event) => setCanvasSize(canvas.width, Number(event.target.value), 'height')}
+            onCommit={(height) => setCanvasSize(canvas.width, height, 'height')}
           />
         </div>
         <Switch checked={canvas.lockAspect} onChange={setLockAspect} label="Lock aspect ratio" />
@@ -123,5 +116,52 @@ export function FramePanel({
         </Field>
       )}
     </>
+  );
+}
+
+/**
+ * A size field that commits when you leave it (or press Enter), not on every
+ * keystroke. Applying half-typed values live meant "7" on the way to "720" was
+ * clamped to the 16px minimum — and with the aspect locked, that rounded the
+ * other side to 16 as well and quietly turned a 16:9 output into a square.
+ */
+function DimensionInput({
+  label,
+  value,
+  onCommit,
+}: {
+  label: string;
+  value: number;
+  onCommit: (value: number) => void;
+}) {
+  const [text, setText] = useState(String(value));
+  const [editing, setEditing] = useState(false);
+
+  useEffect(() => {
+    if (!editing) setText(String(value));
+  }, [value, editing]);
+
+  const commit = () => {
+    setEditing(false);
+    const next = Number(text);
+    if (Number.isFinite(next) && next > 0) onCommit(next);
+    else setText(String(value));
+  };
+
+  return (
+    <input
+      type="number"
+      inputMode="numeric"
+      aria-label={label}
+      min={16}
+      max={2048}
+      value={text}
+      onFocus={() => setEditing(true)}
+      onChange={(event) => setText(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') event.currentTarget.blur();
+      }}
+    />
   );
 }

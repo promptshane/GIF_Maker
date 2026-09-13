@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import {
-  countPixels, frameRgb, generate, importVideo, isOrange, openApp, openTab, probeGif, readResultGif,
+  countPixels, frameDifference, frameRgb, generate, importVideo, isOrange, openApp, openTab, probeGif,
+  readResultGif,
 } from './helpers';
 
 test.describe('Video workflow', () => {
@@ -102,13 +103,14 @@ test.describe('Video workflow', () => {
     expect(fast.frames).toBeGreaterThan(slow.frames * 2);
   });
 
-  test('60 FPS is honestly reported as the 50 FPS the format allows', async ({ page }) => {
+  test('50 FPS is the highest offered, because the format cannot play faster', async ({ page }) => {
     await openApp(page);
     await importVideo(page);
     await openTab(page, 'Edit');
-    await page.getByRole('button', { name: '60', exact: true }).click();
+    await expect(page.getByRole('button', { name: '60', exact: true })).toHaveCount(0);
+    await page.getByRole('button', { name: '50', exact: true }).click();
 
-    await expect(page.locator('.tool-panel')).toContainText('cannot play faster than 50 FPS');
+    await expect(page.locator('.tool-panel')).toContainText('50 FPS is the fastest a GIF can play');
     await expect(page.locator('.stage-meta')).toContainText('50 FPS');
   });
 
@@ -131,14 +133,23 @@ test.describe('Video workflow', () => {
     await page.getByRole('button', { name: 'Crop' }).click();
     await page.getByRole('button', { name: 'Reframe on image' }).click();
 
-    // Shrink the crop rectangle sharply. It resizes about its centre, which is
-    // where the fixture's moving block sits at the midpoint of the clip.
-    const handle = page.getByLabel('Resize crop area');
-    const box = (await handle.boundingBox())!;
-    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-    await page.mouse.down();
-    await page.mouse.move(box.x - 150, box.y - 90, { steps: 12 });
-    await page.mouse.up();
+    // Shrink the crop rectangle sharply from both ends so it stays centred on
+    // the fixture's moving block, which sits mid-frame at the midpoint of the
+    // clip. Each corner resizes against the opposite one, which stays put.
+    const dragHandle = async (label: string, dx: number, dy: number) => {
+      const handle = page.getByLabel(label, { exact: true });
+      const box = (await handle.boundingBox())!;
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(box.x + box.width / 2 + dx, box.y + box.height / 2 + dy, { steps: 12 });
+      await page.mouse.up();
+    };
+    const topLeftBefore = (await page.getByLabel('Resize crop area from the top left').boundingBox())!;
+    await dragHandle('Resize crop area', -120, -70);
+    const topLeftAfter = (await page.getByLabel('Resize crop area from the top left').boundingBox())!;
+    expect(Math.abs(topLeftAfter.x - topLeftBefore.x)).toBeLessThan(2);
+    expect(Math.abs(topLeftAfter.y - topLeftBefore.y)).toBeLessThan(2);
+    await dragHandle('Resize crop area from the top left', 120, 70);
 
     await page.getByRole('button', { name: 'Done reframing' }).click();
     await generate(page);
@@ -152,5 +163,48 @@ test.describe('Video workflow', () => {
     const after = countPixels(cropped, isOrange);
     expect(before).toBeGreaterThan(500);
     expect(after).toBeGreaterThan(before * 1.5);
+  });
+
+  test('changing the output shape and back does not leave the crop zoomed in', async ({ page }) => {
+    await openApp(page);
+    await importVideo(page);
+    await openTab(page, 'Edit');
+    await page.getByRole('button', { name: '10', exact: true }).click();
+
+    await openTab(page, 'Frame');
+    await page.getByRole('button', { name: 'Crop' }).click();
+    await generate(page);
+    const beforeBytes = await readResultGif(page);
+    const midFrame = Math.floor(probeGif(beforeBytes).frames / 2);
+    const before = frameRgb(beforeBytes, midFrame);
+    await page.getByRole('button', { name: 'Change quality and regenerate' }).click();
+    await page.locator('.sheet-backdrop').click({ position: { x: 5, y: 5 } });
+
+    // Wander through other shapes and come back. Each change used to shrink
+    // the crop a little further, and it never recovered.
+    for (const preset of ['4:5', '1:1', '16:9', '4:5', 'Original']) {
+      await page.getByRole('button', { name: preset, exact: true }).click();
+    }
+    await generate(page);
+    const after = frameRgb(await readResultGif(page), midFrame);
+
+    expect(after.width).toBe(before.width);
+    expect(after.height).toBe(before.height);
+    expect(frameDifference(before.data, after.data)).toBeLessThan(1);
+  });
+
+  test('typing an output width keeps the locked aspect ratio', async ({ page }) => {
+    await openApp(page);
+    await importVideo(page);
+    await openTab(page, 'Frame');
+    await expect(page.locator('.stage-meta')).toContainText('640×360');
+
+    // Typed one key at a time: "5" and "50" on the way to "500" must not be
+    // applied as real sizes, which is what used to collapse 16:9 to a square.
+    const width = page.getByRole('spinbutton', { name: 'Output width' });
+    await width.fill('');
+    await width.pressSequentially('500');
+    await width.press('Enter');
+    await expect(page.locator('.stage-meta')).toContainText('500×281');
   });
 });

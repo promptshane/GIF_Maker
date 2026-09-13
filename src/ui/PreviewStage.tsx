@@ -29,6 +29,11 @@ interface StageProps {
  * Everything is edited on the preview itself rather than through numeric
  * fields: drag the body to move, drag the handle to resize (and rotate, for
  * stickers), or pinch anywhere on the selected item.
+ *
+ * Only the *selected* item draws an outline. Unselected items keep an
+ * invisible hit area so a tap still picks them up, but with nothing selected
+ * the stage shows exactly what the GIF will look like — tap empty space to
+ * get there.
  */
 export function PreviewStage(props: StageProps) {
   const { canvasRef, box, mode } = props;
@@ -156,8 +161,8 @@ function StickerBox({
           width: w,
           height: h,
           transform: `rotate(${sticker.rotation}rad)`,
-          borderColor: selected ? 'var(--accent)' : 'rgba(255,255,255,0.35)',
-          borderStyle: selected ? 'solid' : 'dashed',
+          borderColor: selected ? 'var(--accent)' : 'transparent',
+          boxShadow: selected ? undefined : 'none',
         }}
       />
       {selected && (
@@ -271,8 +276,8 @@ function CensorBox({
           top: top - h / 2,
           width: w,
           height: h,
-          borderColor: selected ? 'var(--accent)' : 'rgba(255,255,255,0.35)',
-          borderStyle: selected ? 'solid' : 'dashed',
+          borderColor: selected ? 'var(--accent)' : 'transparent',
+          boxShadow: selected ? undefined : 'none',
         }}
       />
       {selected && (

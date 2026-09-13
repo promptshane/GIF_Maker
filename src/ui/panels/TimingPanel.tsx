@@ -7,7 +7,8 @@ import { formatTimecode } from '../../lib/format';
 import { useGesture } from '../gestures';
 import { clamp } from '../../render/geometry';
 
-const FPS_OPTIONS = [10, 15, 20, 24, 30, 60];
+/** Tops out at the format's real ceiling: GIF cannot play faster than 50 FPS. */
+const FPS_OPTIONS = [10, 15, 20, 24, 30, MAX_GIF_FPS];
 const MIN_SPEED = 0.25;
 const MAX_SPEED = 4;
 const SPEED_STEP = 0.01;
@@ -48,10 +49,10 @@ function FpsField() {
           </button>
         ))}
       </div>
-      {fps > MAX_GIF_FPS && (
+      {fps >= MAX_GIF_FPS && (
         <div className="hint">
-          The GIF format cannot play faster than {MAX_GIF_FPS} FPS — every browser rewrites shorter
-          frame delays. Frames are sampled at {MAX_GIF_FPS} FPS so the speed and length stay correct.
+          {MAX_GIF_FPS} FPS is the fastest a GIF can play — every browser rewrites shorter frame
+          delays.
         </div>
       )}
     </Field>

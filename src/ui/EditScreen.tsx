@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useStore, type EditTool } from '../state/store';
-import { useFramePlan, usePreviewProvider, useRenderSettings } from '../state/hooks';
+import {
+  useFramePlan,
+  usePreviewProvider,
+  useRenderSettings,
+  useSourceDimensions,
+} from '../state/hooks';
 import { usePreviewPlayer } from './usePreviewPlayer';
 import { useSourceScrub } from './useSourceScrub';
 import { useFitBox } from './gestures';
@@ -43,6 +48,7 @@ export function EditScreen() {
 
   const plan = useFramePlan();
   const settings = useRenderSettings();
+  const sourceDims = useSourceDimensions();
   const provider = usePreviewProvider();
   // While a trim handle is being dragged the preview shows that exact decoded
   // source frame instead of a cached one.
@@ -133,6 +139,8 @@ export function EditScreen() {
         {cropping ? (
           <CropEditor
             source={sourceFrame}
+            sourceWidth={sourceDims.width}
+            sourceHeight={sourceDims.height}
             crop={crop}
             onChange={setCrop}
             box={box}

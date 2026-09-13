@@ -28,6 +28,24 @@ function createScratch(width: number, height: number): Scratch {
   return { canvas, ctx: ctx as Ctx2D };
 }
 
+/**
+ * Blur radius in pixels for a strength, relative to the canvas's shorter side.
+ * On a 480px canvas: 0 → ~4px, 0.6 (the default) → ~22px, 1 → ~34px.
+ */
+export function blurRadius(strength: number, canvasShortSide: number): number {
+  return Math.max(1, Math.round(canvasShortSide * (0.008 + clamp(strength, 0, 1) * 0.062)));
+}
+
+/**
+ * Pixelation block size in pixels for a strength, relative to the canvas's
+ * shorter side. Eased so the low end stays fine-grained: on a 480px canvas
+ * 0 → ~5px, 0.6 → ~20px, 1 → ~48px.
+ */
+export function pixelBlockSize(strength: number, canvasShortSide: number): number {
+  const s = clamp(strength, 0, 1);
+  return Math.max(1, canvasShortSide * (0.01 + 0.09 * s * s));
+}
+
 let canvasFilterSupport: boolean | null = null;
 
 /**
@@ -153,10 +171,13 @@ export class Compositor {
       const ch = Math.floor(clamp(y + h, 0, height) - cy);
       if (cw < 1 || ch < 1) continue;
 
+      // Strength is measured against the *canvas*, never the region: making a
+      // region bigger must not also make its blur softer or its blocks coarser.
+      const base = Math.min(width, height);
       const processed =
         region.effect === 'pixelate'
-          ? this.pixelateRegion(ctx, cx, cy, cw, ch, region.strength)
-          : this.blurRegion(ctx, cx, cy, cw, ch, region.strength, width, height);
+          ? this.pixelateRegion(ctx, cx, cy, cw, ch, pixelBlockSize(region.strength, base))
+          : this.blurRegion(ctx, cx, cy, cw, ch, blurRadius(region.strength, base), width, height);
       if (!processed) continue;
 
       ctx.save();
@@ -205,20 +226,52 @@ export class Compositor {
     y: number,
     w: number,
     h: number,
-    strength: number,
+    blockPx: number,
   ): { canvas: HTMLCanvasElement | OffscreenCanvas; sx: number; sy: number } | null {
-    // Strength maps to "blocks across the region", so the look is independent
-    // of the output resolution: 0 -> 26 coarse-ish blocks, 1 -> 3 huge blocks.
-    const blocksAcross = Math.round(26 - clamp(strength, 0, 1) * 23);
-    const bw = Math.max(1, Math.min(w, blocksAcross));
-    const bh = Math.max(1, Math.round((bw * h) / Math.max(1, w)));
+    // Whole blocks across and down; each is then w/bw × h/bh, which is the
+    // requested size to within one block's rounding.
+    const bw = Math.max(1, Math.round(w / blockPx));
+    const bh = Math.max(1, Math.round(h / blockPx));
 
-    const small = this.surface('p', Math.max(bw, 1), Math.max(bh, 1));
+    // Browsers point-sample when a single drawImage shrinks by a large factor
+    // (WebKit especially), so a block would take the colour of one source
+    // pixel rather than the block's average — and on video that shimmers from
+    // frame to frame. Shrink to bw·2ᵏ × bh·2ᵏ first (a ratio of at most ~2,
+    // which bilinear filtering handles well), then halve k times. Each halving
+    // is an exact 2×2 average aligned to the block grid, so every final block
+    // really is the mean of its own pixels and nothing of its neighbours'.
+    let k = 0;
+    while ((bw << (k + 1)) <= w && (bh << (k + 1)) <= h) k++;
+    let source: CanvasImageSource = ctx.canvas as CanvasImageSource;
+    let sx = x;
+    let sy = y;
+    let sw = w;
+    let sh = h;
+    let which: 'a' | 'b' = 'a';
+    for (; k > 0; k--) {
+      const nw = bw << k;
+      const nh = bh << k;
+      const step = this.surface(which, nw, nh);
+      step.ctx.save();
+      step.ctx.setTransform(1, 0, 0, 1, 0, 0);
+      step.ctx.imageSmoothingEnabled = true;
+      step.ctx.imageSmoothingQuality = 'high';
+      step.ctx.drawImage(source, sx, sy, sw, sh, 0, 0, nw, nh);
+      step.ctx.restore();
+      source = step.canvas as CanvasImageSource;
+      sx = 0;
+      sy = 0;
+      sw = nw;
+      sh = nh;
+      which = which === 'a' ? 'b' : 'a';
+    }
+
+    const small = this.surface('p', bw, bh);
     small.ctx.save();
     small.ctx.setTransform(1, 0, 0, 1, 0, 0);
     small.ctx.imageSmoothingEnabled = true;
     small.ctx.imageSmoothingQuality = 'high';
-    small.ctx.drawImage(ctx.canvas as CanvasImageSource, x, y, w, h, 0, 0, bw, bh);
+    small.ctx.drawImage(source, sx, sy, sw, sh, 0, 0, bw, bh);
     small.ctx.restore();
 
     // Blow the tiny image back up with smoothing off to get hard blocks.
@@ -237,14 +290,13 @@ export class Compositor {
     y: number,
     w: number,
     h: number,
-    strength: number,
+    radius: number,
     canvasW: number,
     canvasH: number,
   ): { canvas: HTMLCanvasElement | OffscreenCanvas; sx: number; sy: number } | null {
-    const radius = Math.max(1, Math.round(Math.min(w, h) * (0.03 + clamp(strength, 0, 1) * 0.17)));
     // Sample a padded area so the blur pulls in real neighbouring pixels rather
     // than transparent black, which would darken the edges of the region.
-    const pad = Math.min(radius * 2, 64);
+    const pad = Math.min(radius * 2, 256);
     const px = clamp(x - pad, 0, canvasW);
     const py = clamp(y - pad, 0, canvasH);
     const pw = Math.floor(clamp(x + w + pad, 0, canvasW) - px);

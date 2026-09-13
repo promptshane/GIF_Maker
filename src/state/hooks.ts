@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { useStore } from './store';
+import { sourceDimensions, useStore } from './store';
 import { PhotoFrameProvider, type FrameProvider } from '../media/frames';
 import {
   buildPhotoPlan,
@@ -57,6 +57,13 @@ export function useRenderSettings(): RenderSettings {
     }),
     [canvas, crop, stickers, censors],
   );
+}
+
+/** Pixel size of the source the crop is framed against (video, or first photo). */
+export function useSourceDimensions(): { width: number; height: number } {
+  const width = useStore((state) => sourceDimensions(state).width);
+  const height = useStore((state) => sourceDimensions(state).height);
+  return useMemo(() => ({ width, height }), [width, height]);
 }
 
 /** Frame source for the live preview: photo bitmaps, or cached video frames. */

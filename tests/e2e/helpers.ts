@@ -27,7 +27,7 @@ export async function playableClip(page: Page): Promise<string> {
 
 export async function openApp(page: Page): Promise<void> {
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: 'Make a GIF' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 2, name: 'GIF Maker' })).toBeVisible();
 }
 
 export async function importPhotos(page: Page, files: string[] = PHOTOS): Promise<void> {

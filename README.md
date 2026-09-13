@@ -152,6 +152,46 @@ resolution and where the source pixels come from:
 The preview canvas is capped at a 640px long edge. Every element of the render is
 proportional to canvas size, so it stays a faithful scaled copy.
 
+### Censor regions
+
+Blur radius and pixel block size are set by the **strength** slider as a
+fraction of the canvas's shorter side — never of the region. Resizing a region
+to cover more of a face does not also make its blur softer or its blocks
+coarser, and the preview and the export agree because both scale with their own
+canvas.
+
+Pixelation averages each block properly. A single `drawImage` that shrinks by a
+large factor point-samples in WebKit, which would give each block the colour of
+one source pixel — visibly shimmering on video. The region is instead shrunk to
+`blocks × 2ᵏ` and then halved `k` times, so every step is a grid-aligned 2×2
+average and every block is the true mean of its own pixels.
+
+Position and size can be adjusted from the panel as well as by dragging: a
+nudge pad moves the region 1% of the canvas per tap (hold to repeat), and ±
+steppers do the same for width and height. Only the selected region draws an
+outline; deselect it and the stage shows exactly what the GIF will contain.
+
+### Crop
+
+The crop rectangle lives in normalised source space and is locked to the output
+aspect. Two functions keep it honest:
+
+- `normaliseCrop` is for edits *at* the current aspect: width is authoritative,
+  height follows, and the centre is preserved. The renderer runs it again
+  against whatever image it is drawing, so a project of mixed-aspect photos can
+  never stretch.
+- `refitCrop` is for when the output aspect *changes*: the smallest rectangle
+  of the new aspect that contains everything the old one showed, then shrunk
+  only if it overflows the source. Width-authoritative refitting can only ever
+  shrink, and a few preset changes used to ratchet the crop into a tight zoom
+  that nothing but Reset could undo.
+
+The reframe editor has a handle on each corner; dragging one resizes against
+the opposite corner, which stays put. Typed output sizes commit on blur/Enter,
+and a locked aspect scales the pair into range together — applying "7" on the
+way to "720" used to clamp both sides to the 16px minimum and quietly make the
+output square.
+
 **Trimming does not rebuild the cache.** Dragging a trim handle shows the exact
 frame under it, decoded straight from the video with latest-wins seeking (a new
 target replaces the pending one rather than queueing behind it). The cache only
@@ -280,8 +320,9 @@ These are properties of the platform, handled explicitly rather than hidden:
 - **GIF cannot play faster than 50 FPS.** Frame delays are stored in
   centiseconds, and every mainstream browser rewrites a delay of 0 or 1cs to
   10cs for compatibility with very old files. 2cs (20ms) is the shortest delay
-  that plays as written. Selecting 60 FPS therefore samples at 50 and says so —
-  rather than encoding 60 frames per second that would silently play 20% slow.
+  that plays as written. The frame-rate control therefore tops out at 50 rather
+  than offering a 60 that would silently play 20% slow; a 60 remembered from an
+  earlier build is mapped down to 50 on load.
 - **Frame rates that do not divide 100 jitter slightly.** 24 FPS is 41.67ms,
   which is not a whole number of centiseconds. Delays are rounded with the error
   carried forward, so the *average* rate and the total duration stay correct.
@@ -335,16 +376,18 @@ what the interface claims. Covered:
 | Suite | What it proves |
 | --- | --- |
 | `photos.spec.ts` | Import, reorder, duplicate, delete, per-photo durations, "apply to all", export. Asserts the encoded Graphic Control Extension delays are exactly `[1500, 300]` for a 1.5s + 0.3s pair, and that a corrupt file is reported rather than swallowed |
-| `video.spec.ts` | Trim by dragging, speed, frame rate (real frame counts), the 50 FPS ceiling being reported honestly, and cropping changing the exported pixels while leaving dimensions alone |
+| `video.spec.ts` | Trim by dragging, speed, frame rate (real frame counts), 50 FPS being the top of the control, cropping changing the exported pixels while leaving dimensions alone with the opposite corner pinned, a preset round-trip leaving the crop exactly where it was, and a typed width keeping the locked aspect |
 | `direction.spec.ts` | Forward/reverse traversal verified by tracking the moving block across every decoded frame; boomerang produces exactly `2N-2` frames, peaks in the middle, and repeats no frame at the turnaround or the loop point |
 | `overlays.spec.ts` | An emoji reaching the exported pixels, moving when dragged, and a time-ranged emoji appearing in only part of the GIF. Blur and pixelate each introducing colours that do not exist in the source, differing from one another, and responding to the strength control |
 | `censor-keyframes.spec.ts` | A region with two keyframes tracking a moving subject, verified at the start, middle and end of the clip |
+| `censor-editing.spec.ts` | Nudge moving a region by exactly one step in each direction, steppers resizing one side about the centre, deselecting hiding every outline, and the measured pixel block size staying put when the region doubles |
 | `quality.spec.ts` | Four presets producing four different files in ascending size, with identical dimensions/frames; the displayed MB matching the real byte count; and the pre-encode estimate bracketing the true size |
 | `mobile.spec.ts` | No horizontal overflow and no page scroll at iPhone size across every panel, 44px touch targets, touch drag editing, and the PWA manifest, icons, iOS meta tags and service worker |
 
 Unit tests cover the frame plan (durations, merging, direction, speed, frame
-rate, centisecond rounding, truncation), censor keyframe interpolation, crop and
-placement geometry, and the encoder itself — including an ffmpeg round-trip that
+rate, centisecond rounding, truncation), censor keyframe interpolation, censor
+strength mapping, crop and placement geometry (including the aspect-change
+round trip and locked-aspect sizing), and the encoder itself — including an ffmpeg round-trip that
 decodes each quality level and checks the pixels land where they should.
 
 Test fixtures are generated by ffmpeg (`npm run fixtures`) and are not committed.

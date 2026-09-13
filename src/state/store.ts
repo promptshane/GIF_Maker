@@ -35,7 +35,14 @@ import {
   mergeStaticFrames,
   type FramePlan,
 } from '../render/timeline';
-import { FULL_CROP, clamp, normaliseCrop, sanitiseDimension } from '../render/geometry';
+import {
+  FULL_CROP,
+  clamp,
+  fitLockedDimensions,
+  normaliseCrop,
+  refitCrop,
+  sanitiseDimension,
+} from '../render/geometry';
 import { getQualityProfile } from '../export/quality';
 import {
   encodeGif,
@@ -228,7 +235,12 @@ interface SourceDims {
   height: number;
 }
 
-function sourceDimensions(state: Pick<AppState, 'kind' | 'photos' | 'video'>): SourceDims {
+/**
+ * Pixel size of the source the crop rectangle is framed against: the video, or
+ * the first photo. Exported so the crop editor normalises against the same
+ * dimensions the store does.
+ */
+export function sourceDimensions(state: Pick<AppState, 'kind' | 'photos' | 'video'>): SourceDims {
   if (state.kind === 'video' && state.video) {
     return { width: state.video.width, height: state.video.height };
   }
@@ -282,12 +294,17 @@ export const useStore = create<AppState>()((set, get) => {
   /** Lets the user stop a long export; recreated for each run. */
   let exportAbort: AbortController | null = null;
 
-  /** Re-fits the crop rect whenever the source or the output aspect changes. */
-  const refitCrop = (): void => {
+  /**
+   * Re-fits the crop rect whenever the source or the output aspect changes.
+   * Uses the cover-style refit, not `normaliseCrop`: the latter treats width
+   * as authoritative and so could only ever shrink the crop, which is what
+   * made repeated framing changes zoom further and further in.
+   */
+  const refitCropToOutput = (): void => {
     const state = get();
     const dims = sourceDimensions(state);
     set({
-      crop: normaliseCrop(state.crop, dims.width, dims.height, state.canvas.width, state.canvas.height),
+      crop: refitCrop(state.crop, dims.width, dims.height, state.canvas.width, state.canvas.height),
     });
   };
 
@@ -411,7 +428,7 @@ export const useStore = create<AppState>()((set, get) => {
                 }
               : null,
         });
-        refitCrop();
+        refitCropToOutput();
       } catch (error) {
         set({ busy: null, error: describeError(error) });
       }
@@ -462,7 +479,7 @@ export const useStore = create<AppState>()((set, get) => {
                 }
               : null,
         });
-        refitCrop();
+        refitCropToOutput();
         await get().ensurePreviewCache();
       } catch (error) {
         set({ busy: null, error: describeError(error) });
@@ -565,7 +582,7 @@ export const useStore = create<AppState>()((set, get) => {
       const size = presetDimensions(preset, dims.width, dims.height, state.canvas);
       savePrefs({ canvasPreset: preset, width: size.width, height: size.height });
       set({ canvas: { ...state.canvas, preset, ...size }, result: null, estimate: null });
-      refitCrop();
+      refitCropToOutput();
     },
 
     setCanvasSize: (width, height, driver = 'width') => {
@@ -574,9 +591,15 @@ export const useStore = create<AppState>()((set, get) => {
       let nextWidth = sanitiseDimension(width);
       let nextHeight = sanitiseDimension(height);
       if (previous.lockAspect) {
-        const aspect = previous.width / previous.height;
-        if (driver === 'width') nextHeight = sanitiseDimension(nextWidth / aspect);
-        else nextWidth = sanitiseDimension(nextHeight * aspect);
+        // Derive the other side from the raw value and clamp the *pair*, so a
+        // value that hits the min/max cannot silently change the aspect ratio.
+        const fitted = fitLockedDimensions(
+          driver === 'width' ? width : height,
+          driver,
+          previous.width / previous.height,
+        );
+        nextWidth = fitted.width;
+        nextHeight = fitted.height;
       }
       savePrefs({ canvasPreset: 'custom', width: nextWidth, height: nextHeight });
       set({
@@ -584,7 +607,7 @@ export const useStore = create<AppState>()((set, get) => {
         result: null,
         estimate: null,
       });
-      refitCrop();
+      refitCropToOutput();
     },
 
     setLockAspect: (locked) => set({ canvas: { ...get().canvas, lockAspect: locked } }),
@@ -592,7 +615,7 @@ export const useStore = create<AppState>()((set, get) => {
     setFitMode: (mode) => {
       savePrefs({ fitMode: mode });
       set({ canvas: { ...get().canvas, fitMode: mode }, result: null, estimate: null });
-      refitCrop();
+      refitCropToOutput();
     },
 
     setBackground: (color) => {
@@ -612,7 +635,7 @@ export const useStore = create<AppState>()((set, get) => {
 
     resetCrop: () => {
       set({ crop: { ...FULL_CROP } });
-      refitCrop();
+      refitCropToOutput();
     },
 
     // -------------------------------------------------------------- playback

@@ -1,4 +1,5 @@
 import type { CanvasPreset, FitMode, QualityLevel } from './types';
+import { MAX_GIF_FPS } from '../render/timeline';
 
 const KEY = 'gifmaker.prefs.v1';
 
@@ -40,7 +41,12 @@ export function loadPrefs(): Prefs {
     const raw = localStorage.getItem(KEY);
     if (!raw) return { ...DEFAULT_PREFS };
     const parsed = JSON.parse(raw) as Partial<Prefs>;
-    return { ...DEFAULT_PREFS, ...parsed };
+    const merged = { ...DEFAULT_PREFS, ...parsed };
+    // Earlier builds offered 60 FPS; the format tops out at 50, so map it down
+    // rather than leaving the frame-rate control with nothing selected.
+    if (!Number.isFinite(merged.fps) || merged.fps <= 0) merged.fps = DEFAULT_PREFS.fps;
+    merged.fps = Math.min(merged.fps, MAX_GIF_FPS);
+    return merged;
   } catch {
     // Private browsing and disabled storage both throw here; defaults are fine.
     return { ...DEFAULT_PREFS };

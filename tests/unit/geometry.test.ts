@@ -3,9 +3,15 @@ import {
   FULL_CROP,
   computePlacement,
   containRect,
+  fitLockedDimensions,
   normaliseCrop,
+  refitCrop,
   sanitiseDimension,
 } from '../../src/render/geometry';
+
+/** Pixel aspect of a normalised crop on a given source. */
+const pixelAspect = (crop: { w: number; h: number }, srcW: number, srcH: number) =>
+  (crop.w * srcW) / (crop.h * srcH);
 
 describe('placement', () => {
   it('fit letterboxes a wide source into a square canvas', () => {
@@ -36,6 +42,18 @@ describe('placement', () => {
 
   it('contain fills exactly when the aspects already match', () => {
     expect(containRect(100, 50, 200, 100)).toEqual({ x: 0, y: 0, w: 200, h: 100 });
+  });
+
+  it('never stretches a photo whose aspect differs from the one the crop was framed on', () => {
+    // Crop framed on a 16:9 photo, square output.
+    const crop = normaliseCrop({ x: 0.2, y: 0.1, w: 0.5, h: 0.5 }, 1600, 900, 480, 480);
+    // The same crop applied to a portrait photo in the same project.
+    const { src, dst } = computePlacement(900, 1600, 480, 480, 'crop', crop);
+    expect(src.w / src.h).toBeCloseTo(dst.w / dst.h, 6);
+    expect(src.x).toBeGreaterThanOrEqual(0);
+    expect(src.y).toBeGreaterThanOrEqual(0);
+    expect(src.x + src.w).toBeLessThanOrEqual(900 + 1e-6);
+    expect(src.y + src.h).toBeLessThanOrEqual(1600 + 1e-6);
   });
 });
 
@@ -80,6 +98,48 @@ describe('crop normalisation', () => {
   it('leaves a full crop untouched when the aspects already match', () => {
     expect(normaliseCrop(FULL_CROP, 640, 480, 320, 240)).toEqual({ x: 0, y: 0, w: 1, h: 1 });
   });
+
+  it('is idempotent, so re-normalising on every frame cannot drift', () => {
+    const once = normaliseCrop({ x: 0.13, y: 0.27, w: 0.41, h: 0.6 }, 1920, 1080, 720, 405);
+    expect(normaliseCrop(once, 1920, 1080, 720, 405)).toEqual(once);
+  });
+});
+
+describe('crop refit on aspect change', () => {
+  it('returns to the full frame after a round trip through other aspects', () => {
+    // This is the sequence that used to zoom in a little further on every
+    // change and never recover.
+    let crop = { ...FULL_CROP };
+    const outputs: Array<[number, number]> = [
+      [576, 720], // 4:5
+      [720, 405], // 16:9
+      [720, 720], // 1:1
+      [720, 405], // 16:9
+    ];
+    for (const [w, h] of outputs) {
+      crop = refitCrop(crop, 1920, 1080, w, h);
+      expect(pixelAspect(crop, 1920, 1080)).toBeCloseTo(w / h, 6);
+    }
+    expect(crop.w).toBeCloseTo(1, 6);
+    expect(crop.h).toBeCloseTo(1, 6);
+  });
+
+  it('keeps everything the old crop showed, centred on the same point', () => {
+    const before = normaliseCrop({ x: 0.3, y: 0.3, w: 0.3, h: 0.3 }, 1000, 1000, 400, 400);
+    const after = refitCrop(before, 1000, 1000, 800, 450);
+    expect(pixelAspect(after, 1000, 1000)).toBeCloseTo(800 / 450, 6);
+    expect(after.x).toBeLessThanOrEqual(before.x + 1e-9);
+    expect(after.y).toBeLessThanOrEqual(before.y + 1e-9);
+    expect(after.x + after.w).toBeGreaterThanOrEqual(before.x + before.w - 1e-9);
+    expect(after.y + after.h).toBeGreaterThanOrEqual(before.y + before.h - 1e-9);
+    expect(after.x + after.w / 2).toBeCloseTo(before.x + before.w / 2, 6);
+    expect(after.y + after.h / 2).toBeCloseTo(before.y + before.h / 2, 6);
+  });
+
+  it('shrinks only when the covering rectangle would leave the source', () => {
+    const wide = refitCrop({ x: 0, y: 0, w: 1, h: 1 }, 1000, 1000, 2000, 500);
+    expect(wide).toEqual({ x: 0, y: 0.375, w: 1, h: 0.25 });
+  });
 });
 
 describe('dimension sanitising', () => {
@@ -88,5 +148,26 @@ describe('dimension sanitising', () => {
     expect(sanitiseDimension(99999)).toBe(2048);
     expect(sanitiseDimension(Number.NaN)).toBe(16);
     expect(sanitiseDimension(321.6)).toBe(322);
+  });
+
+  it('keeps a locked aspect when a typed value hits the minimum or maximum', () => {
+    const aspect = 16 / 9;
+    // "7" on the way to "720" used to clamp both sides to 16 and make it square.
+    const tiny = fitLockedDimensions(7, 'width', aspect);
+    expect(tiny.height).toBe(16);
+    expect(tiny.width / tiny.height).toBeCloseTo(aspect, 1);
+
+    const huge = fitLockedDimensions(9000, 'width', aspect);
+    expect(huge.width).toBe(2048);
+    expect(huge.width / huge.height).toBeCloseTo(aspect, 2);
+
+    const byHeight = fitLockedDimensions(405, 'height', aspect);
+    expect(byHeight).toEqual({ width: 720, height: 405 });
+  });
+
+  it('falls back to a sane size for garbage input', () => {
+    const result = fitLockedDimensions(Number.NaN, 'width', 1);
+    expect(result.width).toBeGreaterThanOrEqual(16);
+    expect(result.height).toBeGreaterThanOrEqual(16);
   });
 });

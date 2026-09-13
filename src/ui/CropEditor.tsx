@@ -1,12 +1,19 @@
 import { useEffect, useRef } from 'react';
 import type { CropRect } from '../state/types';
 import type { FrameImage } from '../media/frames';
-import { clamp, normaliseCrop } from '../render/geometry';
+import { MIN_CROP, clamp, normaliseCrop } from '../render/geometry';
 import { useGesture } from './gestures';
 
 interface CropEditorProps {
   /** Full, uncropped source frame to reframe against. */
   source: FrameImage | null;
+  /**
+   * Pixel size of the real source. The preview frame is a downscaled copy whose
+   * rounding can put its aspect a fraction off, and the crop must be normalised
+   * against exactly the dimensions the store uses or each edit would drift.
+   */
+  sourceWidth: number;
+  sourceHeight: number;
   crop: CropRect;
   onChange: (crop: CropRect) => void;
   box: { width: number; height: number };
@@ -15,15 +22,27 @@ interface CropEditorProps {
   outputHeight: number;
 }
 
+type Corner = 'nw' | 'ne' | 'sw' | 'se';
+
+const CORNERS: Array<{ id: Corner; label: string; right: boolean; bottom: boolean }> = [
+  { id: 'nw', label: 'Resize crop area from the top left', right: false, bottom: false },
+  { id: 'ne', label: 'Resize crop area from the top right', right: true, bottom: false },
+  { id: 'sw', label: 'Resize crop area from the bottom left', right: false, bottom: true },
+  { id: 'se', label: 'Resize crop area', right: true, bottom: true },
+];
+
 /**
  * Visual reframing of the source.
  *
  * The crop rectangle is locked to the output aspect ratio, so what is inside
  * the box is exactly what the GIF will contain — no letterboxing and no
- * stretching. Drag to move, pinch or drag the corner to resize.
+ * stretching. Drag the body to move it, pinch to scale about its centre, or
+ * drag any corner to resize against the opposite corner, which stays put.
  */
 export function CropEditor({
   source,
+  sourceWidth,
+  sourceHeight,
   crop,
   onChange,
   box,
@@ -32,7 +51,6 @@ export function CropEditor({
 }: CropEditorProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
-  const handleRef = useRef<HTMLDivElement | null>(null);
   const layerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -52,9 +70,11 @@ export function CropEditor({
     }
   }, [source, box.width, box.height]);
 
+  /** Normalised width per normalised height at the output aspect. */
+  const ratio = (outputWidth / outputHeight) / (sourceWidth / sourceHeight);
+
   const commit = (next: CropRect) => {
-    if (!source) return;
-    onChange(normaliseCrop(next, source.width, source.height, outputWidth, outputHeight));
+    onChange(normaliseCrop(next, sourceWidth, sourceHeight, outputWidth, outputHeight));
   };
 
   useGesture(bodyRef, {
@@ -69,8 +89,8 @@ export function CropEditor({
         // Grow/shrink around the rectangle's own centre.
         const cx = crop.x + crop.w / 2;
         const cy = crop.y + crop.h / 2;
-        next.w = clamp(crop.w * info.scale, 0.05, 1);
-        next.h = clamp(crop.h * info.scale, 0.05, 1);
+        next.w = clamp(crop.w * info.scale, MIN_CROP, 1);
+        next.h = next.w / ratio;
         next.x = cx - next.w / 2;
         next.y = cy - next.h / 2;
       }
@@ -78,19 +98,36 @@ export function CropEditor({
     },
   });
 
-  // Resize about the rectangle's centre, so the subject you framed stays
-  // framed. `normaliseCrop` also preserves the centre, so the two agree.
-  useGesture(handleRef, {
-    onMove: (info) => {
-      const overlay = layerRef.current?.getBoundingClientRect();
-      if (!overlay) return;
-      const centreX = crop.x + crop.w / 2;
-      const centreY = crop.y + crop.h / 2;
-      const centrePx = overlay.left + centreX * box.width;
-      const width = clamp((Math.abs(info.clientX - centrePx) * 2) / box.width, 0.05, 1);
-      commit({ x: centreX - width / 2, y: centreY - crop.h / 2, w: width, h: crop.h });
-    },
-  });
+  /**
+   * Resizes with the corner opposite the one being dragged pinned in place.
+   * The pointer's offset from that anchor gives a wanted width and height;
+   * the box follows whichever is larger at the locked aspect, so dragging
+   * mostly sideways or mostly downwards both feel right.
+   */
+  const resizeFrom = (corner: (typeof CORNERS)[number], clientX: number, clientY: number) => {
+    const overlay = layerRef.current?.getBoundingClientRect();
+    if (!overlay) return;
+    const anchorX = corner.right ? crop.x : crop.x + crop.w;
+    const anchorY = corner.bottom ? crop.y : crop.y + crop.h;
+    const px = (clientX - overlay.left) / box.width;
+    const py = (clientY - overlay.top) / box.height;
+    const wantW = corner.right ? px - anchorX : anchorX - px;
+    const wantH = corner.bottom ? py - anchorY : anchorY - py;
+
+    // Room from the anchor to the source edge in the drag direction.
+    const roomW = corner.right ? 1 - anchorX : anchorX;
+    const roomH = corner.bottom ? 1 - anchorY : anchorY;
+    const maxW = Math.max(MIN_CROP, Math.min(roomW, roomH * ratio));
+    const w = clamp(Math.max(wantW, wantH * ratio), MIN_CROP, maxW);
+    const h = w / ratio;
+
+    commit({
+      x: corner.right ? anchorX : anchorX - w,
+      y: corner.bottom ? anchorY : anchorY - h,
+      w,
+      h,
+    });
+  };
 
   const left = crop.x * box.width;
   const top = crop.y * box.height;
@@ -124,13 +161,32 @@ export function CropEditor({
           }}
           aria-label="Move crop area"
         />
-        <div
-          ref={handleRef}
-          className="handle"
-          style={{ left: left + width, top: top + height }}
-          aria-label="Resize crop area"
-        />
+        {CORNERS.map((corner) => (
+          <CornerHandle
+            key={corner.id}
+            label={corner.label}
+            x={corner.right ? left + width : left}
+            y={corner.bottom ? top + height : top}
+            onDrag={(clientX, clientY) => resizeFrom(corner, clientX, clientY)}
+          />
+        ))}
       </div>
     </div>
   );
+}
+
+function CornerHandle({
+  label,
+  x,
+  y,
+  onDrag,
+}: {
+  label: string;
+  x: number;
+  y: number;
+  onDrag: (clientX: number, clientY: number) => void;
+}) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  useGesture(ref, { onMove: (info) => onDrag(info.clientX, info.clientY) });
+  return <div ref={ref} className="handle" style={{ left: x, top: y }} aria-label={label} />;
 }
