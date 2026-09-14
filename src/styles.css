@@ -183,6 +183,77 @@ button {
   margin-top: 8px;
 }
 
+/* ------------------------------------------------------------ projects */
+.projects { margin-top: 10px; }
+.projects .field-label { margin-bottom: 8px; }
+
+.project-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.project-open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px 10px 10px;
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  border: 1px solid var(--line);
+  text-align: left;
+  min-height: 64px;
+}
+.project-open:active { background: var(--bg-input); }
+.project-thumb {
+  width: 52px;
+  height: 52px;
+  border-radius: 10px;
+  background: var(--bg-input);
+  display: grid;
+  place-items: center;
+  font-size: 22px;
+  overflow: hidden;
+  flex: none;
+}
+.project-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.project-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.project-delete { width: 40px; height: 40px; font-size: 14px; }
+
+/* Save sits beside Export; it is secondary, so it stays a quiet pill. */
+.topbar-save {
+  flex: none;
+  min-height: 38px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: var(--bg-input);
+  color: var(--text-dim);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  position: relative;
+}
+.topbar-save:active { background: var(--line); }
+.topbar-save:disabled { opacity: 0.45; }
+.topbar-save.saved { color: var(--text-faint); }
+.topbar-save.dirty { color: var(--text); }
+.topbar-save.dirty::after {
+  content: '';
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
 /* --------------------------------------------------------------- preview */
 .stage {
   flex: 1;
@@ -313,6 +384,19 @@ button {
   touch-action: none;
 }
 .selection-box.circle { border-radius: 50%; }
+
+/* Censor regions: a thin, quiet outline that only appears briefly. The
+   element stays as the hit area for dragging when it is invisible. */
+.selection-box.censor {
+  border: 1.5px solid rgba(255, 255, 255, 0.75);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  transition: opacity 0.45s ease;
+}
+.selection-box.censor.flash {
+  opacity: 1;
+  transition: opacity 0.08s ease;
+}
 
 .transport {
   display: flex;

@@ -58,39 +58,47 @@ test.describe('Censor editing', () => {
     expect(Math.abs(now.y + now.height / 2 - (start.y + start.height / 2))).toBeLessThan(1);
   });
 
-  test('deselecting hides every outline so the stage shows the finished result', async ({ page }) => {
+  test('the outline shows briefly on selection and change, then leaves the result clear', async ({ page }) => {
     await openApp(page);
     await importPhotos(page, [PHOTOS[0]]);
     await openTab(page, 'Censor');
     await page.getByRole('button', { name: '+ Blur box' }).click();
     await page.getByRole('button', { name: '+ Pixelate box' }).click();
 
-    const outlined = async () =>
-      page.locator('.selection-box').evaluateAll((nodes) =>
-        nodes.filter((node) => {
-          const { borderColor } = getComputedStyle(node);
-          return borderColor !== 'rgba(0, 0, 0, 0)' && borderColor !== 'transparent';
-        }).length,
-      );
+    const boxes = page.locator('.selection-box.censor');
+    const selected = page.locator('.selection-box.censor[data-selected]');
+    const opacity = (locator: import('@playwright/test').Locator) =>
+      locator.evaluate((node) => Number(getComputedStyle(node).opacity));
 
-    // Only the selected region is outlined, never the others.
-    expect(await outlined()).toBe(1);
-    await expect(page.locator('.handle')).toHaveCount(1);
-
-    await page.getByRole('button', { name: 'Deselect to preview the result' }).click();
-    expect(await outlined()).toBe(0);
+    // No resize handle any more; size comes from the panel.
     await expect(page.locator('.handle')).toHaveCount(0);
-    await expect(page.locator('.tool-panel')).toContainText('Showing the finished result');
+    await expect(boxes).toHaveCount(2);
 
-    // Tapping a region on the preview picks it up again.
-    const first = (await page.locator('.selection-box').first().boundingBox())!;
+    // The newly selected region flashes its outline, then it fades away.
+    await expect(selected).toHaveCount(1);
+    await expect(selected).toHaveClass(/flash/);
+    await expect(selected).not.toHaveClass(/flash/, { timeout: 4000 });
+    await expect.poll(() => opacity(selected)).toBe(0);
+    // The other region never shows one.
+    expect(await opacity(boxes.first())).toBe(0);
+
+    // Adjusting it brings the outline back, so you can see what moved.
+    await page.getByRole('button', { name: 'Nudge right' }).click();
+    await expect(selected).toHaveClass(/flash/);
+    await expect(selected).not.toHaveClass(/flash/, { timeout: 4000 });
+
+    // Deselecting clears the selection entirely; tapping a region picks it up again.
+    await page.getByRole('button', { name: 'Deselect' }).click();
+    await expect(selected).toHaveCount(0);
+    const first = (await boxes.first().boundingBox())!;
     await page.mouse.click(first.x + first.width / 2, first.y + first.height / 2);
-    expect(await outlined()).toBe(1);
+    await expect(selected).toHaveCount(1);
+    await expect(selected).toHaveClass(/flash/);
 
     // And tapping empty space deselects too.
     const stage = (await page.locator('.stage-inner').boundingBox())!;
     await page.mouse.click(stage.x + 4, stage.y + 4);
-    expect(await outlined()).toBe(0);
+    await expect(selected).toHaveCount(0);
   });
 
   test('strength does not change with the size of the region', async ({ page }) => {

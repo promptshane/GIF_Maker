@@ -21,6 +21,9 @@ const STEP = 0.01;
 const MIN_SIZE = 0.02;
 const MAX_SIZE = 1.5;
 
+/** Keeps stepped values on exact hundredths, so a step back lands exactly where it started. */
+const snap = (value: number): number => Math.round(value * 1e4) / 1e4;
+
 export function CensorPanel({
   playheadMs,
   durationMs,
@@ -45,8 +48,8 @@ export function CensorPanel({
     if (!selected || !rect) return;
     setCensorRect(selected.id, playheadMs, {
       ...rect,
-      x: clamp(rect.x + dx, 0, 1),
-      y: clamp(rect.y + dy, 0, 1),
+      x: snap(clamp(rect.x + dx, 0, 1)),
+      y: snap(clamp(rect.y + dy, 0, 1)),
     });
   };
 
@@ -54,8 +57,8 @@ export function CensorPanel({
     if (!selected || !rect) return;
     setCensorRect(selected.id, playheadMs, {
       ...rect,
-      w: clamp(patch.w ?? rect.w, MIN_SIZE, MAX_SIZE),
-      h: clamp(patch.h ?? rect.h, MIN_SIZE, MAX_SIZE),
+      w: snap(clamp(patch.w ?? rect.w, MIN_SIZE, MAX_SIZE)),
+      h: snap(clamp(patch.h ?? rect.h, MIN_SIZE, MAX_SIZE)),
     });
   };
 
@@ -77,7 +80,8 @@ export function CensorPanel({
 
       {censors.length === 0 ? (
         <div className="empty-note">
-          Add a region, then drag it over what you want hidden. Drag the corner handle to resize.
+          Add a region, then drag it over what you want hidden. Set its size and fine-tune its
+          position with the controls below.
         </div>
       ) : (
         <Field label="Regions" value={`${censors.length}`}>
@@ -108,20 +112,15 @@ export function CensorPanel({
               </div>
             </div>
           ))}
-          {selected ? (
+          {selected && (
             <button
               type="button"
               className="ghost-btn"
               style={{ width: '100%', minHeight: 40 }}
               onClick={() => selectOverlay(null)}
             >
-              Deselect to preview the result
+              Deselect
             </button>
-          ) : (
-            <div className="hint" style={{ marginTop: 0 }}>
-              Showing the finished result. Tap a region on the preview, or one in this list, to
-              edit it.
-            </div>
           )}
         </Field>
       )}

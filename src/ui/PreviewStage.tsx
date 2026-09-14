@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { CensorRegion, Sticker } from '../state/types';
 import { censorRectAt, isActiveAt } from '../render/timeline';
 import { clamp } from '../render/geometry';
@@ -208,6 +208,15 @@ function CensorLayer({
   );
 }
 
+/** How long a censor region's outline stays up after it is selected or moved. */
+const CENSOR_OUTLINE_MS = 1100;
+
+/**
+ * A censor region's hit area, and a brief outline so you know which one you
+ * are editing. The outline shows when the region is selected and again on
+ * every change to it, then fades, so the censored result stays visible
+ * without chrome on top of it. Size is set from the panel, not a handle.
+ */
 function CensorBox({
   region,
   timeMs,
@@ -224,8 +233,19 @@ function CensorBox({
   onChange: (rect: { x: number; y: number; w: number; h: number }) => void;
 }) {
   const bodyRef = useRef<HTMLDivElement | null>(null);
-  const handleRef = useRef<HTMLDivElement | null>(null);
   const rect = censorRectAt(region, timeMs);
+  const [flash, setFlash] = useState(false);
+
+  useEffect(() => {
+    if (!selected) {
+      setFlash(false);
+      return;
+    }
+    setFlash(true);
+    const timer = window.setTimeout(() => setFlash(false), CENSOR_OUTLINE_MS);
+    return () => window.clearTimeout(timer);
+    // Re-arm on every geometry change, so the outline stays while dragging or nudging.
+  }, [selected, rect.x, rect.y, rect.w, rect.h]);
 
   useGesture(bodyRef, {
     onStart: onSelect,
@@ -244,50 +264,22 @@ function CensorBox({
     },
   });
 
-  // Resizes about the centre so the censored subject stays covered while sizing.
-  useGesture(handleRef, {
-    onStart: onSelect,
-    onMove: (info) => {
-      const overlay = handleRef.current?.parentElement?.getBoundingClientRect();
-      if (!overlay) return;
-      const centreX = overlay.left + rect.x * box.width;
-      const centreY = overlay.top + rect.y * box.height;
-      onChange({
-        x: rect.x,
-        y: rect.y,
-        w: clamp((Math.abs(info.clientX - centreX) * 2) / box.width, 0.02, 2),
-        h: clamp((Math.abs(info.clientY - centreY) * 2) / box.height, 0.02, 2),
-      });
-    },
-  });
-
   const w = rect.w * box.width;
   const h = rect.h * box.height;
   const left = rect.x * box.width;
   const top = rect.y * box.height;
 
   return (
-    <>
-      <div
-        ref={bodyRef}
-        className={`selection-box${region.shape === 'circle' ? ' circle' : ''}`}
-        style={{
-          left: left - w / 2,
-          top: top - h / 2,
-          width: w,
-          height: h,
-          borderColor: selected ? 'var(--accent)' : 'transparent',
-          boxShadow: selected ? undefined : 'none',
-        }}
-      />
-      {selected && (
-        <div
-          ref={handleRef}
-          className="handle"
-          style={{ left: left + w / 2, top: top + h / 2 }}
-          aria-label="Resize censor region"
-        />
-      )}
-    </>
+    <div
+      ref={bodyRef}
+      className={`selection-box censor${region.shape === 'circle' ? ' circle' : ''}${flash ? ' flash' : ''}`}
+      data-selected={selected ? 'true' : undefined}
+      style={{
+        left: left - w / 2,
+        top: top - h / 2,
+        width: w,
+        height: h,
+      }}
+    />
   );
 }
