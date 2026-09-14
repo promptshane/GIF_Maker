@@ -28,7 +28,7 @@ test.describe('Video workflow', () => {
     expect(Number(framesText.replace(/\D/g, ''))).toBeGreaterThan(20);
 
     // 2x speed halves the duration.
-    await page.getByRole('button', { name: '2×' }).click();
+    await page.getByRole('slider', { name: 'Playback speed' }).fill('2');
     await expect(page.locator('.stage-meta')).toContainText('1.0s');
 
     await generate(page);

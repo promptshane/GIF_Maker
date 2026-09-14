@@ -19,11 +19,12 @@ test.describe('New projects start clean', () => {
 
     await openTab(page, 'Edit');
     await page.getByRole('button', { name: 'Boomerang' }).click();
-    await page.getByRole('button', { name: '2×' }).click();
+    await page.getByRole('slider', { name: 'Playback speed' }).fill('2');
     await expect(page.getByRole('button', { name: 'Boomerang' })).toHaveAttribute(
       'aria-pressed',
       'true',
     );
+    await expect(page.getByRole('slider', { name: 'Playback speed' })).toHaveValue('2');
 
     await page.getByLabel('Start over').click();
     await expect(page.getByRole('heading', { level: 2, name: 'GIF Maker' })).toBeVisible();
@@ -35,10 +36,7 @@ test.describe('New projects start clean', () => {
       'aria-pressed',
       'true',
     );
-    await expect(page.getByRole('button', { name: '1×', exact: true })).toHaveAttribute(
-      'aria-pressed',
-      'true',
-    );
+    await expect(page.getByRole('slider', { name: 'Playback speed' })).toHaveValue('1');
 
     // And no overlays survived.
     await openTab(page, 'Emoji');
