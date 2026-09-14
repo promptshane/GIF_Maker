@@ -50,8 +50,27 @@ import {
   type EncodeProgress,
   type SizeEstimate,
 } from '../export/encodeGif';
-import { renderPaletteSamples, type RenderSettings } from '../export/renderPipeline';
+import { FrameRenderer, renderPaletteSamples, type RenderSettings } from '../export/renderPipeline';
 import { uid } from '../lib/format';
+import {
+  defaultProjectName,
+  editsSnapshot,
+  projectBytes,
+  toFiles,
+  toProjectData,
+  type ProjectEdits,
+  type SavedProjectMeta,
+} from './projects';
+import {
+  deleteProject as deleteStoredProject,
+  getProject,
+  getProjectMeta,
+  isEphemeralStorageError,
+  isQuotaError,
+  projectsSupported,
+  putProject,
+  requestPersistence,
+} from './projectsDb';
 
 export type Step = 'import' | 'edit' | 'export';
 export type EditTool = 'timing' | 'stickers' | 'censor' | 'canvas';
@@ -112,6 +131,14 @@ interface AppState {
   busy: Busy | null;
   error: AppError | null;
 
+  /** Whether this browser can keep projects on the device at all. */
+  projectsSupported: boolean;
+  /** Identity of the saved project this editor session belongs to, if any. */
+  projectId: string | null;
+  projectName: string | null;
+  /** `editsSnapshot` as of the last save; compared live to detect unsaved changes. */
+  savedSnapshot: string | null;
+
   // ----------------------------------------------------------------- actions
   setStep: (step: Step) => void;
   setTool: (tool: EditTool) => void;
@@ -120,6 +147,12 @@ interface AppState {
   importPhotos: (files: File[]) => Promise<void>;
   importVideo: (file: File) => Promise<void>;
   reset: () => void;
+
+  /** Writes the current project to on-device storage under `name`. Resolves true on success. */
+  saveProject: (name: string) => Promise<boolean>;
+  /** Reopens a saved project in an editable state. */
+  openProject: (id: string) => Promise<void>;
+  deleteProject: (id: string) => Promise<void>;
 
   reorderPhotos: (from: number, to: number) => void;
   removePhoto: (id: string) => void;
@@ -188,6 +221,21 @@ const freshEdits = () => ({
   result: null,
   estimate: null,
   tool: 'timing' as EditTool,
+  // A new import is a new project, not a change to the one that was open.
+  projectId: null,
+  projectName: null,
+  savedSnapshot: null,
+});
+
+/** Edits restored from a saved project, applied on top of `freshEdits`. */
+const restoredEdits = (edits: ProjectEdits) => ({
+  canvas: { ...edits.canvas },
+  crop: { ...edits.crop },
+  videoSettings: { ...edits.videoSettings },
+  fps: edits.fps,
+  quality: edits.quality,
+  stickers: edits.stickers,
+  censors: edits.censors,
 });
 
 const initialVideoSettings = (): VideoSettings => ({
@@ -320,6 +368,199 @@ export const useStore = create<AppState>()((set, get) => {
     if (state.result) URL.revokeObjectURL(state.result.url);
   };
 
+  interface PhotoInput {
+    file: File;
+    durationMs: number;
+  }
+
+  /**
+   * Decodes photos into the project. Shared by a fresh import, "+ Add" on an
+   * existing project, and reopening a saved one — which passes the saved
+   * edits to restore instead of starting from `freshEdits`.
+   */
+  const loadPhotos = async (
+    inputs: PhotoInput[],
+    { append, restore = null }: { append: boolean; restore?: ProjectEdits | null },
+  ): Promise<void> => {
+    if (inputs.length === 0) return;
+    set({ busy: { label: 'Reading photos…', progress: 0 }, error: null });
+
+    const existing = append ? get().photos : [];
+    const added: PhotoAsset[] = [];
+    const failures: string[] = [];
+    // A saved project stores each distinct file once; decode it once too.
+    const decodedByFile = new Map<File, PhotoAsset>();
+    try {
+      for (let i = 0; i < inputs.length; i++) {
+        set({
+          busy: { label: `Reading photo ${i + 1} of ${inputs.length}…`, progress: i / inputs.length },
+        });
+        const input = inputs[i];
+        const twin = decodedByFile.get(input.file);
+        if (twin) {
+          added.push({ ...twin, id: uid(), durationMs: input.durationMs });
+          continue;
+        }
+        try {
+          const decoded = await decodePhotoFile(input.file);
+          const asset: PhotoAsset = {
+            id: uid(),
+            name: input.file.name,
+            width: decoded.width,
+            height: decoded.height,
+            durationMs: input.durationMs,
+            image: decoded.image,
+            thumbUrl: decoded.thumbUrl,
+            file: input.file,
+          };
+          decodedByFile.set(input.file, asset);
+          added.push(asset);
+        } catch (error) {
+          failures.push(describeError(error).message);
+        }
+      }
+
+      if (added.length === 0) {
+        // Nothing decoded: leave the existing project untouched.
+        set({
+          busy: null,
+          error: {
+            message: failures[0] ?? 'None of those files could be opened.',
+            hint: failures.length > 1 ? `${failures.length} files failed.` : undefined,
+          },
+        });
+        return;
+      }
+
+      // Only now is it safe to release a previously imported video.
+      if (!append) clearMedia();
+
+      const photos = [...existing, ...added];
+      const canvas = get().canvas;
+      const size =
+        existing.length > 0
+          ? { width: canvas.width, height: canvas.height }
+          : presetDimensions(canvas.preset, photos[0].width, photos[0].height, canvas);
+
+      set({
+        // Appending to an existing project keeps its edits; starting a new
+        // one discards them, so a previous GIF never bleeds into the next.
+        ...(append ? { result: null, estimate: null } : freshEdits()),
+        ...(restore ? restoredEdits(restore) : {}),
+        kind: 'photos',
+        photos,
+        video: null,
+        reader: null,
+        previewCache: null,
+        cachedRange: null,
+        ...(restore ? {} : { canvas: { ...canvas, ...size } }),
+        step: 'edit',
+        busy: null,
+        error:
+          failures.length > 0
+            ? {
+                message: `${failures.length} file${failures.length > 1 ? 's' : ''} could not be opened.`,
+                hint: failures[0],
+              }
+            : null,
+      });
+      // A restored crop was normalised when it was saved; a new one must be.
+      if (!restore) refitCropToOutput();
+    } catch (error) {
+      set({ busy: null, error: describeError(error) });
+    }
+  };
+
+  /** Opens a video as the project, restoring saved edits when given. */
+  const loadVideo = async (file: File, restore: ProjectEdits | null): Promise<void> => {
+    set({ busy: { label: 'Opening video…' }, error: null });
+    clearMedia();
+    set({
+      photos: [],
+      video: null,
+      reader: null,
+      previewCache: null,
+      cachedRange: null,
+      result: null,
+      estimate: null,
+    });
+    try {
+      const reader = await VideoFrameReader.open(file);
+      // Default to the first few seconds: a whole clip at GIF frame rates is
+      // usually far larger than anyone wants.
+      const trimEnd = Math.min(reader.duration, 5);
+      const canvas = get().canvas;
+      const size = presetDimensions(canvas.preset, reader.width, reader.height, canvas);
+
+      set({
+        ...freshEdits(),
+        ...(restore ? restoredEdits(restore) : {}),
+        kind: 'video',
+        video: {
+          id: uid(),
+          name: file.name,
+          width: reader.width,
+          height: reader.height,
+          duration: reader.duration,
+          type: file.type,
+          sizeBytes: file.size,
+          file,
+        },
+        reader,
+        ...(restore
+          ? {}
+          : {
+              canvas: { ...canvas, ...size },
+              videoSettings: { trimStart: 0, trimEnd, direction: 'forward', speed: 1 },
+            }),
+        step: 'edit',
+        busy: null,
+        error:
+          file.size > LARGE_VIDEO_BYTES
+            ? {
+                message: 'That is a large video.',
+                hint: 'Keep the trimmed range short — long selections at high frame rates can run out of memory.',
+              }
+            : null,
+      });
+      if (!restore) refitCropToOutput();
+      await get().ensurePreviewCache();
+    } catch (error) {
+      set({ busy: null, error: describeError(error) });
+    }
+  };
+
+  /**
+   * A small JPEG of the first frame with the edits applied, for the saved
+   * projects list. Best effort: a project with no renderable frame (a video
+   * whose preview cache is missing) simply has no picture.
+   */
+  const renderThumbnail = async (state: AppState): Promise<Blob | null> => {
+    try {
+      const plan = selectPlan(state);
+      const provider = selectPreviewProvider(state);
+      const first = plan.frames[0];
+      if (!provider || !first) return null;
+      const settings = selectRenderSettings(state);
+      const scale = Math.min(1, 160 / Math.max(settings.width, settings.height));
+      const renderer = new FrameRenderer(settings.width * scale, settings.height * scale);
+      try {
+        const pixels = await renderer.render(provider, first.source, first.timeMs, settings);
+        const canvas = document.createElement('canvas');
+        canvas.width = pixels.width;
+        canvas.height = pixels.height;
+        canvas.getContext('2d')?.putImageData(pixels, 0, 0);
+        return await new Promise<Blob | null>((resolve) =>
+          canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.75),
+        );
+      } finally {
+        renderer.dispose();
+      }
+    } catch {
+      return null;
+    }
+  };
+
   return {
     step: 'import',
     tool: 'timing',
@@ -347,6 +588,10 @@ export const useStore = create<AppState>()((set, get) => {
     result: null,
     busy: null,
     error: null,
+    projectsSupported: projectsSupported(),
+    projectId: null,
+    projectName: null,
+    savedSnapshot: null,
 
     setStep: (step) => set({ step }),
     setTool: (tool) => set({ tool }),
@@ -356,134 +601,16 @@ export const useStore = create<AppState>()((set, get) => {
 
     importPhotos: async (files) => {
       if (files.length === 0) return;
-      set({ busy: { label: 'Reading photos…', progress: 0 }, error: null });
-
       const wasPhotos = get().kind === 'photos';
-      const existing = wasPhotos ? get().photos : [];
-      const defaultDuration = loadPrefs().photoDurationMs;
-
-      const added: PhotoAsset[] = [];
-      const failures: string[] = [];
-      try {
-        for (let i = 0; i < files.length; i++) {
-          set({
-            busy: { label: `Reading photo ${i + 1} of ${files.length}…`, progress: i / files.length },
-          });
-          try {
-            const decoded = await decodePhotoFile(files[i]);
-            added.push({
-              id: uid(),
-              name: files[i].name,
-              width: decoded.width,
-              height: decoded.height,
-              durationMs: defaultDuration,
-              image: decoded.image,
-              thumbUrl: decoded.thumbUrl,
-            });
-          } catch (error) {
-            failures.push(describeError(error).message);
-          }
-        }
-
-        if (added.length === 0) {
-          // Nothing decoded: leave the existing project untouched.
-          set({
-            busy: null,
-            error: {
-              message: failures[0] ?? 'None of those files could be opened.',
-              hint: failures.length > 1 ? `${failures.length} files failed.` : undefined,
-            },
-          });
-          return;
-        }
-
-        // Only now is it safe to release a previously imported video.
-        if (!wasPhotos) clearMedia();
-
-        const photos = [...existing, ...added];
-        const canvas = get().canvas;
-        const size =
-          existing.length > 0
-            ? { width: canvas.width, height: canvas.height }
-            : presetDimensions(canvas.preset, photos[0].width, photos[0].height, canvas);
-
-        set({
-          // Appending to an existing project keeps its edits; starting a new
-          // one discards them, so a previous GIF never bleeds into the next.
-          ...(existing.length > 0 ? { result: null, estimate: null } : freshEdits()),
-          kind: 'photos',
-          photos,
-          video: null,
-          reader: null,
-          previewCache: null,
-          cachedRange: null,
-          canvas: { ...canvas, ...size },
-          step: 'edit',
-          busy: null,
-          error:
-            failures.length > 0
-              ? {
-                  message: `${failures.length} file${failures.length > 1 ? 's' : ''} could not be opened.`,
-                  hint: failures[0],
-                }
-              : null,
-        });
-        refitCropToOutput();
-      } catch (error) {
-        set({ busy: null, error: describeError(error) });
-      }
+      const durationMs = loadPrefs().photoDurationMs;
+      await loadPhotos(
+        files.map((file) => ({ file, durationMs })),
+        { append: wasPhotos },
+      );
     },
 
     importVideo: async (file) => {
-      set({ busy: { label: 'Opening video…' }, error: null });
-      clearMedia();
-      set({
-        photos: [],
-        video: null,
-        reader: null,
-        previewCache: null,
-        cachedRange: null,
-        result: null,
-        estimate: null,
-      });
-      try {
-        const reader = await VideoFrameReader.open(file);
-        // Default to the first few seconds: a whole clip at GIF frame rates is
-        // usually far larger than anyone wants.
-        const trimEnd = Math.min(reader.duration, 5);
-        const canvas = get().canvas;
-        const size = presetDimensions(canvas.preset, reader.width, reader.height, canvas);
-
-        set({
-          ...freshEdits(),
-          kind: 'video',
-          video: {
-            id: uid(),
-            name: file.name,
-            width: reader.width,
-            height: reader.height,
-            duration: reader.duration,
-            type: file.type,
-            sizeBytes: file.size,
-          },
-          reader,
-          canvas: { ...canvas, ...size },
-          videoSettings: { trimStart: 0, trimEnd, direction: 'forward', speed: 1 },
-          step: 'edit',
-          busy: null,
-          error:
-            file.size > LARGE_VIDEO_BYTES
-              ? {
-                  message: 'That is a large video.',
-                  hint: 'Keep the trimmed range short — long selections at high frame rates can run out of memory.',
-                }
-              : null,
-        });
-        refitCropToOutput();
-        await get().ensurePreviewCache();
-      } catch (error) {
-        set({ busy: null, error: describeError(error) });
-      }
+      await loadVideo(file, null);
     },
 
     reset: () => {
@@ -515,6 +642,95 @@ export const useStore = create<AppState>()((set, get) => {
         busy: null,
         error: null,
       });
+    },
+
+    // -------------------------------------------------------------- projects
+
+    saveProject: async (name) => {
+      const state = get();
+      const trimmed = name.trim() || defaultProjectName(state);
+      const id = state.projectId ?? uid();
+      set({ busy: { label: 'Saving project…' }, error: null });
+      try {
+        const data = toProjectData(id, state);
+        const meta: SavedProjectMeta = {
+          id,
+          name: trimmed,
+          savedAt: Date.now(),
+          kind: data.kind,
+          thumb: await renderThumbnail(state),
+          bytes: projectBytes(data),
+          durationMs: selectPlan(state).durationMs,
+          photoCount: state.photos.length,
+        };
+        await putProject(meta, data);
+        // Ask only once something is worth keeping; the answer is advisory.
+        void requestPersistence();
+        set({
+          projectId: id,
+          projectName: trimmed,
+          savedSnapshot: editsSnapshot(get()),
+          busy: null,
+        });
+        return true;
+      } catch (error) {
+        set({
+          busy: null,
+          error: isQuotaError(error)
+            ? {
+                message: 'There is not enough storage to save this project.',
+                hint: 'Delete an older project from the home screen, or free up space on this device.',
+              }
+            : isEphemeralStorageError(error)
+              ? {
+                  message: 'Projects cannot be saved in Private Browsing.',
+                  hint: 'Open the app in a normal window, or from the Home Screen, to keep projects.',
+                }
+              : {
+                  message: 'The project could not be saved.',
+                  hint: describeError(error).message,
+                },
+        });
+        return false;
+      }
+    },
+
+    openProject: async (id) => {
+      set({ busy: { label: 'Opening project…' }, error: null });
+      let data;
+      try {
+        data = await getProject(id);
+      } catch (error) {
+        set({ busy: null, error: { message: 'The project could not be opened.', hint: describeError(error).message } });
+        return;
+      }
+      if (!data) {
+        set({ busy: null, error: { message: 'That project is no longer in storage.' } });
+        return;
+      }
+      const files = toFiles(data);
+      if (data.kind === 'video') {
+        await loadVideo(files[0], data.edits);
+      } else {
+        await loadPhotos(
+          data.photos.map((photo) => ({ file: files[photo.file], durationMs: photo.durationMs })),
+          { append: false, restore: data.edits },
+        );
+      }
+      // Only a project that actually opened is "the saved project".
+      if (get().video || get().photos.length > 0) {
+        const meta = await getProjectMeta(id).catch(() => null);
+        set({ projectId: id, projectName: meta?.name ?? null, savedSnapshot: editsSnapshot(get()) });
+      }
+    },
+
+    deleteProject: async (id) => {
+      try {
+        await deleteStoredProject(id);
+        if (get().projectId === id) set({ projectId: null, projectName: null, savedSnapshot: null });
+      } catch (error) {
+        set({ error: { message: 'The project could not be deleted.', hint: describeError(error).message } });
+      }
     },
 
     // ---------------------------------------------------------------- photos

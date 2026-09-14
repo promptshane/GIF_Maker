@@ -1,11 +1,15 @@
-import { useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useStore } from '../state/store';
+import { listProjects, storageEstimate } from '../state/projectsDb';
+import type { SavedProjectMeta } from '../state/projects';
+import { formatBytesShort, formatDuration } from '../lib/format';
 
 export function ImportScreen() {
   const photoInput = useRef<HTMLInputElement | null>(null);
   const videoInput = useRef<HTMLInputElement | null>(null);
   const importPhotos = useStore((state) => state.importPhotos);
   const importVideo = useStore((state) => state.importVideo);
+  const projectsSupported = useStore((state) => state.projectsSupported);
 
   return (
     <div className="import">
@@ -34,9 +38,11 @@ export function ImportScreen() {
         </span>
       </button>
 
+      {projectsSupported && <SavedProjects />}
+
       <p className="fineprint">
         Photos and videos never leave this device — there is no server and nothing is uploaded.
-        Imported media is held in memory for this session only.
+        Saved projects are kept in this browser's storage on this device only.
       </p>
 
       {/* `accept` steers the iOS picker; HEIC is included explicitly because
@@ -64,6 +70,105 @@ export function ImportScreen() {
           if (file) void importVideo(file);
         }}
       />
+    </div>
+  );
+}
+
+/**
+ * Projects saved on this device, newest first. Opening one re-imports its
+ * stored media and restores every edit; deleting asks first, because the
+ * media goes with it.
+ */
+function SavedProjects() {
+  const openProject = useStore((state) => state.openProject);
+  const deleteProject = useStore((state) => state.deleteProject);
+  const [projects, setProjects] = useState<SavedProjectMeta[] | null>(null);
+  const [storage, setStorage] = useState<{ usage: number; quota: number } | null>(null);
+
+  const refresh = () => {
+    listProjects().then(setProjects, () => setProjects([]));
+    void storageEstimate().then(setStorage);
+  };
+  useEffect(refresh, []);
+
+  if (!projects || projects.length === 0) return null;
+
+  return (
+    <section className="projects" aria-label="Saved projects">
+      <div className="field-label">
+        <span>Saved projects</span>
+        <span className="value">{projects.length}</span>
+      </div>
+      {projects.map((project) => (
+        <ProjectRow
+          key={project.id}
+          project={project}
+          onOpen={() => void openProject(project.id)}
+          onDelete={() => {
+            if (confirm(`Delete “${project.name}” from this device? Its media goes with it.`)) {
+              void deleteProject(project.id).then(refresh);
+            }
+          }}
+        />
+      ))}
+      {storage && storage.quota > 0 && (
+        <div className="hint" style={{ textAlign: 'center' }}>
+          Using {formatBytesShort(storage.usage)} of about {formatBytesShort(storage.quota)} available
+          to this app.
+        </div>
+      )}
+    </section>
+  );
+}
+
+function ProjectRow({
+  project,
+  onOpen,
+  onDelete,
+}: {
+  project: SavedProjectMeta;
+  onOpen: () => void;
+  onDelete: () => void;
+}) {
+  const [thumbUrl, setThumbUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!project.thumb) return;
+    const url = URL.createObjectURL(project.thumb);
+    setThumbUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [project.thumb]);
+
+  const what =
+    project.kind === 'video'
+      ? 'Video'
+      : `${project.photoCount} photo${project.photoCount === 1 ? '' : 's'}`;
+  const when = new Date(project.savedAt).toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+  });
+
+  return (
+    <div className="project-row">
+      <button type="button" className="project-open" onClick={onOpen} aria-label={`Open ${project.name}`}>
+        <span className="project-thumb" aria-hidden="true">
+          {thumbUrl ? <img src={thumbUrl} alt="" /> : project.kind === 'video' ? '🎬' : '🖼️'}
+        </span>
+        <span className="grow" style={{ minWidth: 0 }}>
+          <span className="pick-title project-name">{project.name}</span>
+          <span className="pick-sub">
+            {what} · {formatDuration(project.durationMs)} · {formatBytesShort(project.bytes)} · {when}
+          </span>
+        </span>
+      </button>
+      <button
+        type="button"
+        className="icon-only project-delete"
+        onClick={onDelete}
+        aria-label={`Delete ${project.name}`}
+        title="Delete"
+      >
+        ✕
+      </button>
     </div>
   );
 }

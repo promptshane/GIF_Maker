@@ -4,7 +4,8 @@
 
 A personal, install-to-home-screen GIF maker for iPhone. Import photos or a
 video, edit, preview, pick a quality, generate a real `.gif`, see its exact size,
-and save it to Photos.
+and save it to Photos. Projects can be saved on the device and reopened later,
+edits and all.
 
 Everything runs in the browser. There is no backend, no account, and no upload —
 media never leaves the device.
@@ -168,8 +169,47 @@ average and every block is the true mean of its own pixels.
 
 Position and size can be adjusted from the panel as well as by dragging: a
 nudge pad moves the region 1% of the canvas per tap (hold to repeat), and ±
-steppers do the same for width and height. Only the selected region draws an
-outline; deselect it and the stage shows exactly what the GIF will contain.
+steppers do the same for width and height; both land on exact hundredths. There
+is no resize handle on the stage. The selected region shows a thin outline for
+about a second when selected and again after each change, then fades, so the
+censored result is visible without chrome on top of it. Tapping empty stage
+space deselects.
+
+### Saved projects
+
+**Save** in the top bar writes the project to the device: every edit (trim,
+speed, direction, frame rate, output size and framing, crop, stickers, censor
+regions with their keyframes, photo order and durations, quality) plus the
+**original media files**, so reopening runs the normal import path and lands in
+exactly the same editable state. The home screen lists saved projects with a
+thumbnail of the first frame, edits applied.
+
+Storage is IndexedDB ([`projectsDb.ts`](src/state/projectsDb.ts)) — the only
+browser storage that takes a `Blob` without copying it through a string, which
+is what makes storing a whole video file practical. A project is two rows: a
+small `meta` row the home screen lists without touching media, and a `data`
+row with the edits and files. Duplicated photos are stored once and referenced
+by index. Serialisation is pure and unit-tested
+([`projects.ts`](src/state/projects.ts)); the database module is thin.
+
+"Unsaved changes" is not a flag every edit action has to remember to set. The
+store keeps a fingerprint of everything a save would write, taken at the last
+save, and the Save button compares it live — so undoing a nudge exactly reads
+as saved again.
+
+What this is and is not:
+
+- **On this device only.** Nothing is uploaded and nothing syncs; the browser's
+  storage for this site is the whole story. "Clear website data" removes it.
+- **A convenience, not a backup.** The exported GIF is the durable artefact.
+  Safari deletes a site's script-written storage after seven days without a
+  visit *in a Safari tab*; the installed Home Screen app is exempt. The app asks
+  for persistent storage on first save, which is advisory.
+- **Private Browsing cannot save.** WebKit keeps IndexedDB in memory there, and
+  that store cannot hold Blobs. The app says so rather than failing silently.
+- **Each project carries its full video.** iPhone clips are large; the home
+  screen shows what is used and roughly what is available, and a full quota is
+  reported cleanly.
 
 ### Crop
 
@@ -349,12 +389,13 @@ These are properties of the platform, handled explicitly rather than hidden:
   seeking and export almost instantly. There is a **Cancel** button throughout.
 - **Web Share** needs a secure context and a browser that accepts files. The
   download and long-press paths are always available.
-- **Nothing is persisted but preferences.** Frame rate, quality, output
-  dimensions, framing mode, background and the default photo duration are kept in
-  `localStorage`. Per-clip *edits* — trim, direction, speed, crop, stickers,
-  censor regions — deliberately are not, so every new project starts clean.
-  Imported media is held in memory for the session and released on "Start over"
-  or when the tab closes.
+- **Only preferences and explicitly saved projects persist.** Frame rate,
+  quality, output dimensions, framing mode, background and the default photo
+  duration are kept in `localStorage`. Per-clip *edits* — trim, direction,
+  speed, crop, stickers, censor regions — are not, so every new import starts
+  clean; **Save** keeps a project, media included, in IndexedDB (see *Saved
+  projects*). Imported media is otherwise held in memory for the session and
+  released on "Start over" or when the tab closes.
 - **Full screen is an in-app mode, not the Fullscreen API.** iOS Safari only
   grants native fullscreen to `<video>` elements, so the expand button hides
   every piece of chrome instead. That behaves identically in the installed PWA,
@@ -380,14 +421,16 @@ what the interface claims. Covered:
 | `direction.spec.ts` | Forward/reverse traversal verified by tracking the moving block across every decoded frame; boomerang produces exactly `2N-2` frames, peaks in the middle, and repeats no frame at the turnaround or the loop point |
 | `overlays.spec.ts` | An emoji reaching the exported pixels, moving when dragged, and a time-ranged emoji appearing in only part of the GIF. Blur and pixelate each introducing colours that do not exist in the source, differing from one another, and responding to the strength control |
 | `censor-keyframes.spec.ts` | A region with two keyframes tracking a moving subject, verified at the start, middle and end of the clip |
-| `censor-editing.spec.ts` | Nudge moving a region by exactly one step in each direction, steppers resizing one side about the centre, deselecting hiding every outline, and the measured pixel block size staying put when the region doubles |
+| `censor-editing.spec.ts` | Nudge moving a region by exactly one step in each direction, steppers resizing one side about the centre, the outline flashing on selection and change then fading with no handle left behind, and the measured pixel block size staying put when the region doubles |
+| `projects.spec.ts` | A video project with FPS, speed and a nudged censor saved, the unsaved-changes flag, a save in place, a page reload, reopening from the home screen with every edit back and a pixel-identical export; a photo project keeping order, durations and a duplicate, then deletion; Start over keeping a saved project; and the Private Browsing message. Runs WebKit in a persistent context, since its in-memory IndexedDB cannot store Blobs |
 | `quality.spec.ts` | Four presets producing four different files in ascending size, with identical dimensions/frames; the displayed MB matching the real byte count; and the pre-encode estimate bracketing the true size |
 | `mobile.spec.ts` | No horizontal overflow and no page scroll at iPhone size across every panel, 44px touch targets, touch drag editing, and the PWA manifest, icons, iOS meta tags and service worker |
 
 Unit tests cover the frame plan (durations, merging, direction, speed, frame
 rate, centisecond rounding, truncation), censor keyframe interpolation, censor
 strength mapping, crop and placement geometry (including the aspect-change
-round trip and locked-aspect sizing), and the encoder itself — including an ffmpeg round-trip that
+round trip and locked-aspect sizing), project serialisation and the
+unsaved-changes fingerprint, and the encoder itself — including an ffmpeg round-trip that
 decodes each quality level and checks the pixels land where they should.
 
 Test fixtures are generated by ffmpeg (`npm run fixtures`) and are not committed.

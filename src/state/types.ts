@@ -13,6 +13,11 @@ export interface PhotoAsset {
   image: ImageBitmap;
   /** Small object URL used by the film strip. Revoked with the photo. */
   thumbUrl: string;
+  /**
+   * The file as picked, kept so the project can be saved and reopened. A
+   * duplicate shares its original's file, bitmap and thumbnail.
+   */
+  file: Blob;
 }
 
 export interface VideoAsset {
@@ -24,6 +29,8 @@ export interface VideoAsset {
   duration: number;
   type: string;
   sizeBytes: number;
+  /** The file as picked, kept so the project can be saved and reopened. */
+  file: Blob;
 }
 
 // ------------------------------------------------------------------ canvas

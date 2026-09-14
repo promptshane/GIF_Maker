@@ -8,6 +8,7 @@ import {
   type FramePlan,
 } from '../render/timeline';
 import type { RenderSettings } from '../export/renderPipeline';
+import { editsSnapshot } from './projects';
 
 /**
  * The frame plan, memoised on its real inputs.
@@ -75,5 +76,16 @@ export function usePreviewProvider(): FrameProvider | null {
   return useMemo(
     () => (kind === 'photos' ? new PhotoFrameProvider(photos) : previewCache),
     [kind, photos, previewCache],
+  );
+}
+
+/**
+ * Whether the editor differs from what was last saved. Computed by fingerprint
+ * rather than a flag, so every edit action is covered without opting in.
+ * Never "dirty" for a project that has not been saved at all.
+ */
+export function useProjectDirty(): boolean {
+  return useStore(
+    (state) => state.savedSnapshot !== null && editsSnapshot(state) !== state.savedSnapshot,
   );
 }
