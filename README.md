@@ -2,10 +2,12 @@
 
 **Live: <https://promptshane.github.io/GIF_Maker/>**
 
-A personal, install-to-home-screen GIF maker for iPhone. Import photos or a
-video, edit, preview, pick a quality, generate a real `.gif`, see its exact size,
-and save it to Photos. Projects can be saved on the device and reopened later,
-edits and all.
+A personal, install-to-home-screen GIF and photo editor for iPhone. The opening
+screen offers two focused workflows: make an animated GIF from photos or video,
+or edit a still photo with blur, pixelation and black-bar censoring. The photo
+editor shows the actual compressed JPEG while its quality slider moves, including
+the resulting resolution and file size. Projects can be saved on the device and
+reopened later, edits and all.
 
 Everything runs in the browser. There is no backend, no account, and no upload —
 media never leaves the device.
@@ -109,7 +111,7 @@ src/
 ├── state/        types, zustand store, memoised selectors, local preferences
 ├── media/        import + decode: photos, HEIC, video seeking, frame caches
 ├── render/       geometry, the frame plan (timeline), the canvas compositor
-├── export/       quality presets, GIF encoder core, worker, orchestration
+├── export/       GIF encoding plus exact JPEG preview/export
 ├── ui/           screens, panels, gestures, preview player
 └── types/        ambient declarations for gifenc
 ```
@@ -175,6 +177,12 @@ about a second when selected and again after each change, then fades, so the
 censored result is visible without chrome on top of it. Tapping empty stage
 space deselects.
 
+Regions can also be duplicated with their exact dimensions. When matching-size
+regions approach the same horizontal or vertical centre, they snap into place
+and briefly show a cyan alignment guide. Black bars use the same positioning,
+nudge and sizing controls as blur and pixelation, in both the GIF and photo
+editors.
+
 ### Saved projects
 
 **Save** in the top bar writes the project to the device: every edit (trim,
@@ -182,7 +190,8 @@ speed, direction, frame rate, output size and framing, crop, stickers, censor
 regions with their keyframes, photo order and durations, quality) plus the
 **original media files**, so reopening runs the normal import path and lands in
 exactly the same editable state. The home screen lists saved projects with a
-thumbnail of the first frame, edits applied.
+thumbnail of the first frame, edits applied. GIF and still-photo projects are
+listed in their respective workflows, so each home screen stays focused.
 
 Storage is IndexedDB ([`projectsDb.ts`](src/state/projectsDb.ts)) — the only
 browser storage that takes a `Blob` without copying it through a string, which

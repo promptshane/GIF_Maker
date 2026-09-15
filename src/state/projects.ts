@@ -4,6 +4,7 @@ import type {
   CropRect,
   PhotoAsset,
   QualityLevel,
+  ProjectMode,
   SourceKind,
   Sticker,
   VideoSettings,
@@ -30,6 +31,8 @@ export interface ProjectEdits {
   videoSettings: VideoSettings;
   fps: number;
   quality: QualityLevel;
+  /** JPEG quality/resolution slider used by still-photo projects. */
+  photoQuality?: number;
   stickers: Sticker[];
   censors: CensorRegion[];
 }
@@ -40,6 +43,8 @@ export interface SavedProjectMeta {
   /** Unix milliseconds. */
   savedAt: number;
   kind: SourceKind;
+  /** Missing on projects saved before the photo editor existed; those are GIFs. */
+  mode?: ProjectMode;
   /** Small JPEG of the first frame with edits applied; null if none could be rendered. */
   thumb: Blob | null;
   /** Total size of the stored media. */
@@ -58,6 +63,7 @@ export interface SavedProjectData {
   id: string;
   version: number;
   kind: SourceKind;
+  mode?: ProjectMode;
   /** Unique source files. Photos reference these by index so duplicates are stored once. */
   files: StoredFile[];
   photos: Array<{ file: number; durationMs: number }>;
@@ -66,6 +72,7 @@ export interface SavedProjectData {
 
 /** The slice of store state a project is built from. */
 export interface ProjectSource extends ProjectEdits {
+  appMode?: ProjectMode | null;
   kind: SourceKind | null;
   photos: PhotoAsset[];
   video: { name: string; type: string; file: Blob } | null;
@@ -87,6 +94,7 @@ export function editsSnapshot(state: ProjectSource): string {
     videoSettings: state.videoSettings,
     fps: state.fps,
     quality: state.quality,
+    ...(state.photoQuality !== undefined ? { photoQuality: state.photoQuality } : {}),
     stickers: state.stickers,
     censors: state.censors,
   });
@@ -99,6 +107,7 @@ export function pickEdits(state: ProjectEdits): ProjectEdits {
     videoSettings: { ...state.videoSettings },
     fps: state.fps,
     quality: state.quality,
+    ...(state.photoQuality !== undefined ? { photoQuality: state.photoQuality } : {}),
     stickers: state.stickers.map((sticker) => ({ ...sticker, range: sticker.range && { ...sticker.range } })),
     censors: state.censors.map((region) => ({
       ...region,
@@ -115,6 +124,7 @@ export function toProjectData(id: string, state: ProjectSource): SavedProjectDat
       id,
       version: PROJECT_VERSION,
       kind: 'video',
+      mode: state.appMode ?? 'gif',
       files: [{ name: state.video.name, type: state.video.type, blob: state.video.file }],
       photos: [],
       edits: pickEdits(state),
@@ -133,7 +143,15 @@ export function toProjectData(id: string, state: ProjectSource): SavedProjectDat
       }
       return { file: index, durationMs: photo.durationMs };
     });
-    return { id, version: PROJECT_VERSION, kind: 'photos', files, photos, edits: pickEdits(state) };
+    return {
+      id,
+      version: PROJECT_VERSION,
+      kind: 'photos',
+      mode: state.appMode ?? 'gif',
+      files,
+      photos,
+      edits: pickEdits(state),
+    };
   }
   throw new Error('There is nothing to save yet.');
 }

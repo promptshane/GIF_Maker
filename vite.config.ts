@@ -51,7 +51,7 @@ export default defineConfig({
       manifest: {
         name: 'GIF Maker',
         short_name: 'GIF Maker',
-        description: 'Make GIFs from photos and video, entirely on your device.',
+        description: 'Edit photos and make GIFs from photos or video, entirely on your device.',
         start_url: './',
         scope: './',
         display: 'standalone',

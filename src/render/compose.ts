@@ -171,6 +171,28 @@ export class Compositor {
       const ch = Math.floor(clamp(y + h, 0, height) - cy);
       if (cw < 1 || ch < 1) continue;
 
+      if (region.effect === 'black') {
+        ctx.save();
+        ctx.fillStyle = '#000000';
+        ctx.beginPath();
+        if (region.shape === 'circle') {
+          ctx.ellipse(
+            x + w / 2,
+            y + h / 2,
+            Math.max(0.5, w / 2),
+            Math.max(0.5, h / 2),
+            0,
+            0,
+            Math.PI * 2,
+          );
+        } else {
+          ctx.rect(cx, cy, cw, ch);
+        }
+        ctx.fill();
+        ctx.restore();
+        continue;
+      }
+
       // Strength is measured against the *canvas*, never the region: making a
       // region bigger must not also make its blur softer or its blocks coarser.
       const base = Math.min(width, height);

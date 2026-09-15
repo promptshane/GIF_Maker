@@ -21,6 +21,7 @@ interface StageProps {
   /** Output canvas dimensions, needed to convert sticker size to a box. */
   outputWidth: number;
   outputHeight: number;
+  previewLabel?: string;
 }
 
 /**
@@ -40,7 +41,7 @@ export function PreviewStage(props: StageProps) {
 
   return (
     <div className="stage-inner" style={{ width: box.width, height: box.height }}>
-      <canvas ref={canvasRef} aria-label="GIF preview" />
+      <canvas ref={canvasRef} aria-label={props.previewLabel ?? 'GIF preview'} />
       {mode === 'stickers' && <StickerLayer {...props} />}
       {mode === 'censor' && <CensorLayer {...props} />}
     </div>
@@ -189,6 +190,46 @@ function CensorLayer({
   onMoveCensor,
 }: StageProps) {
   const visible = censors.filter((region) => isActiveAt(region.range, timeMs));
+  const [guides, setGuides] = useState<{ x: number | null; y: number | null }>({ x: null, y: null });
+  const timerRef = useRef<number | null>(null);
+  const alignedRef = useRef({ x: false, y: false });
+
+  const showGuides = (next: { x: number | null; y: number | null }) => {
+    if (next.x === null && next.y === null) return;
+    setGuides(next);
+    if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+    timerRef.current = window.setTimeout(() => setGuides({ x: null, y: null }), 700);
+  };
+
+  useEffect(
+    () => () => {
+      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+    },
+    [],
+  );
+
+  // Also catches precise alignment reached through the nudge controls.
+  useEffect(() => {
+    const selected = visible.find((region) => region.id === selectedId);
+    if (!selected) return;
+    const here = censorRectAt(selected, timeMs);
+    let x: number | null = null;
+    let y: number | null = null;
+    for (const other of visible) {
+      if (other.id === selected.id) continue;
+      const there = censorRectAt(other, timeMs);
+      const sameSize = Math.abs(here.w - there.w) < 0.0005 && Math.abs(here.h - there.h) < 0.0005;
+      if (!sameSize) continue;
+      if (Math.abs(here.x - there.x) < 0.0005) x = here.x;
+      if (Math.abs(here.y - there.y) < 0.0005) y = here.y;
+    }
+    const aligned = { x: x !== null, y: y !== null };
+    if ((aligned.x && !alignedRef.current.x) || (aligned.y && !alignedRef.current.y)) {
+      showGuides({ x, y });
+    }
+    alignedRef.current = aligned;
+  }, [censors, selectedId, timeMs]);
+
   return (
     <div className="overlay-layer" onPointerDown={(event) => {
       if (event.target === event.currentTarget) onSelect(null);
@@ -202,8 +243,16 @@ function CensorLayer({
           selected={region.id === selectedId}
           onSelect={() => onSelect(region.id)}
           onChange={(rect) => onMoveCensor(region.id, rect)}
+          peers={visible}
+          onAlign={showGuides}
         />
       ))}
+      {guides.x !== null && (
+        <div className="alignment-guide vertical" style={{ left: `${guides.x * 100}%` }} aria-hidden="true" />
+      )}
+      {guides.y !== null && (
+        <div className="alignment-guide horizontal" style={{ top: `${guides.y * 100}%` }} aria-hidden="true" />
+      )}
     </div>
   );
 }
@@ -224,6 +273,8 @@ function CensorBox({
   selected,
   onSelect,
   onChange,
+  peers,
+  onAlign,
 }: {
   region: CensorRegion;
   timeMs: number;
@@ -231,6 +282,8 @@ function CensorBox({
   selected: boolean;
   onSelect: () => void;
   onChange: (rect: { x: number; y: number; w: number; h: number }) => void;
+  peers: CensorRegion[];
+  onAlign: (guides: { x: number | null; y: number | null }) => void;
 }) {
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const rect = censorRectAt(region, timeMs);
@@ -259,6 +312,30 @@ function CensorBox({
       if (info.pointers >= 2) {
         next.w = clamp(rect.w * info.scale, 0.02, 2);
         next.h = clamp(rect.h * info.scale, 0.02, 2);
+      }
+      // Matching-size regions magnetise very slightly at their centre lines.
+      // Six screen pixels is enough to make deliberate alignment easy without
+      // making ordinary movement feel sticky.
+      const snapX = 6 / Math.max(1, box.width);
+      const snapY = 6 / Math.max(1, box.height);
+      let alignedX = false;
+      let alignedY = false;
+      for (const peer of peers) {
+        if (peer.id === region.id) continue;
+        const there = censorRectAt(peer, timeMs);
+        const sameSize = Math.abs(next.w - there.w) < 0.0005 && Math.abs(next.h - there.h) < 0.0005;
+        if (!sameSize) continue;
+        if (Math.abs(next.x - there.x) <= snapX) {
+          next.x = there.x;
+          alignedX = true;
+        }
+        if (Math.abs(next.y - there.y) <= snapY) {
+          next.y = there.y;
+          alignedY = true;
+        }
+      }
+      if (alignedX || alignedY) {
+        onAlign({ x: alignedX ? next.x : null, y: alignedY ? next.y : null });
       }
       onChange(next);
     },

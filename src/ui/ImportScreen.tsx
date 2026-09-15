@@ -3,19 +3,25 @@ import { useStore } from '../state/store';
 import { listProjects, storageEstimate } from '../state/projectsDb';
 import type { SavedProjectMeta } from '../state/projects';
 import { formatBytesShort, formatDuration } from '../lib/format';
+import type { ProjectMode } from '../state/types';
 
-export function ImportScreen() {
+export function ImportScreen({ mode = 'gif' }: { mode?: ProjectMode }) {
   const photoInput = useRef<HTMLInputElement | null>(null);
   const videoInput = useRef<HTMLInputElement | null>(null);
   const importPhotos = useStore((state) => state.importPhotos);
   const importVideo = useStore((state) => state.importVideo);
+  const importPhoto = useStore((state) => state.importPhoto);
   const projectsSupported = useStore((state) => state.projectsSupported);
 
   return (
     <div className="import">
       <div className="import-hero">
-        <h2>GIF Maker</h2>
-        <p>From photos or a video clip. Everything happens on your device.</p>
+        <h2>{mode === 'photo' ? 'Photo Editor' : 'GIF Maker'}</h2>
+        <p>
+          {mode === 'photo'
+            ? 'Censor and resize a photo, then choose exactly how much quality to keep.'
+            : 'From photos or a video clip. Everything happens on your device.'}
+        </p>
       </div>
 
       <button type="button" className="pick" onClick={() => photoInput.current?.click()}>
@@ -23,12 +29,16 @@ export function ImportScreen() {
           🖼️
         </span>
         <span className="grow">
-          <span className="pick-title">Photos</span>
-          <span className="pick-sub">Pick one or more. Reorder and time each one.</span>
+          <span className="pick-title">{mode === 'photo' ? 'Choose a photo' : 'Photos'}</span>
+          <span className="pick-sub">
+            {mode === 'photo'
+              ? 'JPG, PNG, HEIC and other common image formats.'
+              : 'Pick one or more. Reorder and time each one.'}
+          </span>
         </span>
       </button>
 
-      <button type="button" className="pick" onClick={() => videoInput.current?.click()}>
+      {mode === 'gif' && <button type="button" className="pick" onClick={() => videoInput.current?.click()}>
         <span className="pick-icon" aria-hidden="true">
           🎬
         </span>
@@ -36,9 +46,9 @@ export function ImportScreen() {
           <span className="pick-title">Video</span>
           <span className="pick-sub">Trim, reframe, set speed and direction.</span>
         </span>
-      </button>
+      </button>}
 
-      {projectsSupported && <SavedProjects />}
+      {projectsSupported && <SavedProjects mode={mode} />}
 
       <p className="fineprint">
         Photos and videos never leave this device — there is no server and nothing is uploaded.
@@ -51,12 +61,15 @@ export function ImportScreen() {
         ref={photoInput}
         type="file"
         accept="image/*,.heic,.heif"
-        multiple
+        multiple={mode === 'gif'}
         hidden
         onChange={(event) => {
           const files = Array.from(event.target.files ?? []);
           event.target.value = '';
-          if (files.length) void importPhotos(files);
+          if (files.length) {
+            if (mode === 'photo') void importPhoto(files[0]);
+            else void importPhotos(files);
+          }
         }}
       />
       <input
@@ -79,14 +92,17 @@ export function ImportScreen() {
  * stored media and restores every edit; deleting asks first, because the
  * media goes with it.
  */
-function SavedProjects() {
+export function SavedProjects({ mode }: { mode: ProjectMode }) {
   const openProject = useStore((state) => state.openProject);
   const deleteProject = useStore((state) => state.deleteProject);
   const [projects, setProjects] = useState<SavedProjectMeta[] | null>(null);
   const [storage, setStorage] = useState<{ usage: number; quota: number } | null>(null);
 
   const refresh = () => {
-    listProjects().then(setProjects, () => setProjects([]));
+    listProjects().then(
+      (rows) => setProjects(rows.filter((project) => (project.mode ?? 'gif') === mode)),
+      () => setProjects([]),
+    );
     void storageEstimate().then(setStorage);
   };
   useEffect(refresh, []);
@@ -141,7 +157,9 @@ function ProjectRow({
   const what =
     project.kind === 'video'
       ? 'Video'
-      : `${project.photoCount} photo${project.photoCount === 1 ? '' : 's'}`;
+      : project.mode === 'photo'
+        ? 'Edited photo'
+        : `${project.photoCount} photo${project.photoCount === 1 ? '' : 's'}`;
   const when = new Date(project.savedAt).toLocaleDateString(undefined, {
     month: 'short',
     day: 'numeric',
@@ -156,7 +174,8 @@ function ProjectRow({
         <span className="grow" style={{ minWidth: 0 }}>
           <span className="pick-title project-name">{project.name}</span>
           <span className="pick-sub">
-            {what} · {formatDuration(project.durationMs)} · {formatBytesShort(project.bytes)} · {when}
+            {what} · {project.mode === 'photo' ? '' : `${formatDuration(project.durationMs)} · `}
+            {formatBytesShort(project.bytes)} · {when}
           </span>
         </span>
       </button>

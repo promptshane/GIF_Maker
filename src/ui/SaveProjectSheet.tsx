@@ -13,6 +13,7 @@ export function SaveProjectSheet({ open, onClose }: { open: boolean; onClose: ()
   const photos = useStore((state) => state.photos);
   const video = useStore((state) => state.video);
   const saveProject = useStore((state) => state.saveProject);
+  const appMode = useStore((state) => state.appMode);
   const [name, setName] = useState('');
 
   useEffect(() => {
@@ -53,7 +54,7 @@ export function SaveProjectSheet({ open, onClose }: { open: boolean; onClose: ()
       </form>
       <div className="hint">
         Saved projects appear on the home screen. They live in this browser's storage, so
-        clearing website data removes them — the exported GIF is the safe copy.
+        clearing website data removes them — the exported {appMode === 'photo' ? 'photo' : 'GIF'} is the safe copy.
       </div>
     </Sheet>
   );

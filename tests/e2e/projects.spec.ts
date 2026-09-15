@@ -92,6 +92,7 @@ test.describe('Saved projects', () => {
 
     // Come back later: a fresh page load, then open it from the home screen.
     await page.reload();
+    await page.getByRole('button', { name: 'Create GIF' }).click();
     await expect(page.getByRole('heading', { level: 2, name: 'GIF Maker' })).toBeVisible();
     const row = page.locator('.project-row', { hasText: 'Nudged clip' });
     await expect(row).toContainText('Video');
@@ -137,6 +138,7 @@ test.describe('Saved projects', () => {
 
     await saveAs(page, 'Three frames');
     await page.reload();
+    await page.getByRole('button', { name: 'Create GIF' }).click();
     await expect(page.getByRole('heading', { level: 2, name: 'GIF Maker' })).toBeVisible();
     const row = page.locator('.project-row', { hasText: 'Three frames' });
     await expect(row).toContainText('3 photos');
@@ -156,6 +158,7 @@ test.describe('Saved projects', () => {
     await page.getByRole('button', { name: 'Delete Three frames' }).click();
     await expect(row).toHaveCount(0);
     await page.reload();
+    await page.getByRole('button', { name: 'Create GIF' }).click();
     await expect(page.getByRole('heading', { level: 2, name: 'GIF Maker' })).toBeVisible();
     await expect(page.locator('.project-row', { hasText: 'Three frames' })).toHaveCount(0);
   });

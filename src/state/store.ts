@@ -10,6 +10,7 @@ import type {
   ExportResult,
   FitMode,
   PhotoAsset,
+  ProjectMode,
   QualityLevel,
   SourceKind,
   Sticker,
@@ -73,7 +74,7 @@ import {
 } from './projectsDb';
 
 export type Step = 'import' | 'edit' | 'export';
-export type EditTool = 'timing' | 'stickers' | 'censor' | 'canvas';
+export type EditTool = 'timing' | 'stickers' | 'censor' | 'canvas' | 'quality';
 
 export interface AppError {
   message: string;
@@ -86,6 +87,8 @@ interface Busy {
 }
 
 interface AppState {
+  /** null is the first-run chooser; otherwise it selects the GIF or photo workspace. */
+  appMode: ProjectMode | null;
   step: Step;
   tool: EditTool;
   kind: SourceKind | null;
@@ -122,6 +125,8 @@ interface AppState {
   selectedOverlayId: string | null;
 
   quality: QualityLevel;
+  /** 1..100; controls both JPEG compression and exported still-image resolution. */
+  photoQuality: number;
   estimate: SizeEstimate | null;
   estimating: boolean;
   exporting: boolean;
@@ -141,10 +146,13 @@ interface AppState {
 
   // ----------------------------------------------------------------- actions
   setStep: (step: Step) => void;
+  setAppMode: (mode: ProjectMode) => void;
+  goHome: () => void;
   setTool: (tool: EditTool) => void;
   setError: (error: AppError | null) => void;
 
   importPhotos: (files: File[]) => Promise<void>;
+  importPhoto: (file: File) => Promise<void>;
   importVideo: (file: File) => Promise<void>;
   reset: () => void;
 
@@ -180,6 +188,7 @@ interface AppState {
   removeSticker: (id: string) => void;
 
   addCensor: (effect: CensorEffect, shape: CensorShape) => void;
+  duplicateCensor: (id: string, timeMs: number) => void;
   updateCensor: (id: string, patch: Partial<Omit<CensorRegion, 'keyframes'>>) => void;
   removeCensor: (id: string) => void;
   setCensorRect: (id: string, timeMs: number, rect: { x: number; y: number; w: number; h: number }) => void;
@@ -188,6 +197,7 @@ interface AppState {
   selectOverlay: (id: string | null) => void;
 
   setQuality: (quality: QualityLevel) => void;
+  setPhotoQuality: (quality: number) => void;
   ensurePreviewCache: () => Promise<void>;
   runEstimate: () => Promise<void>;
   generate: () => Promise<void>;
@@ -210,7 +220,7 @@ const initialCanvas = (): CanvasSettings => ({
  * Per-clip edits, as they should look for a brand-new project. Preferences
  * (output size, frame rate, quality) deliberately survive; edits do not.
  */
-const freshEdits = () => ({
+const freshEdits = (mode: ProjectMode = 'gif') => ({
   crop: { ...FULL_CROP },
   stickers: [] as Sticker[],
   censors: [] as CensorRegion[],
@@ -220,7 +230,8 @@ const freshEdits = () => ({
   cacheStale: false,
   result: null,
   estimate: null,
-  tool: 'timing' as EditTool,
+  photoQuality: 100,
+  tool: (mode === 'photo' ? 'censor' : 'timing') as EditTool,
   // A new import is a new project, not a change to the one that was open.
   projectId: null,
   projectName: null,
@@ -234,6 +245,7 @@ const restoredEdits = (edits: ProjectEdits) => ({
   videoSettings: { ...edits.videoSettings },
   fps: edits.fps,
   quality: edits.quality,
+  photoQuality: edits.photoQuality ?? 100,
   stickers: edits.stickers,
   censors: edits.censors,
 });
@@ -380,7 +392,11 @@ export const useStore = create<AppState>()((set, get) => {
    */
   const loadPhotos = async (
     inputs: PhotoInput[],
-    { append, restore = null }: { append: boolean; restore?: ProjectEdits | null },
+    {
+      append,
+      restore = null,
+      mode = get().appMode ?? 'gif',
+    }: { append: boolean; restore?: ProjectEdits | null; mode?: ProjectMode },
   ): Promise<void> => {
     if (inputs.length === 0) return;
     set({ busy: { label: 'Reading photos…', progress: 0 }, error: null });
@@ -445,9 +461,10 @@ export const useStore = create<AppState>()((set, get) => {
       set({
         // Appending to an existing project keeps its edits; starting a new
         // one discards them, so a previous GIF never bleeds into the next.
-        ...(append ? { result: null, estimate: null } : freshEdits()),
+        ...(append ? { result: null, estimate: null } : freshEdits(mode)),
         ...(restore ? restoredEdits(restore) : {}),
         kind: 'photos',
+        appMode: mode,
         photos,
         video: null,
         reader: null,
@@ -493,9 +510,10 @@ export const useStore = create<AppState>()((set, get) => {
       const size = presetDimensions(canvas.preset, reader.width, reader.height, canvas);
 
       set({
-        ...freshEdits(),
+        ...freshEdits('gif'),
         ...(restore ? restoredEdits(restore) : {}),
         kind: 'video',
+        appMode: 'gif',
         video: {
           id: uid(),
           name: file.name,
@@ -562,6 +580,7 @@ export const useStore = create<AppState>()((set, get) => {
   };
 
   return {
+    appMode: null,
     step: 'import',
     tool: 'timing',
     kind: null,
@@ -581,6 +600,7 @@ export const useStore = create<AppState>()((set, get) => {
     censors: [],
     selectedOverlayId: null,
     quality: prefs.quality,
+    photoQuality: 100,
     estimate: null,
     estimating: false,
     exporting: false,
@@ -594,6 +614,24 @@ export const useStore = create<AppState>()((set, get) => {
     savedSnapshot: null,
 
     setStep: (step) => set({ step }),
+    setAppMode: (appMode) => set({ appMode, step: 'import', tool: appMode === 'photo' ? 'censor' : 'timing' }),
+    goHome: () => {
+      clearMedia();
+      set({
+        appMode: null,
+        step: 'import',
+        kind: null,
+        photos: [],
+        video: null,
+        reader: null,
+        previewCache: null,
+        cachedRange: null,
+        ...freshEdits('gif'),
+        busy: null,
+        error: null,
+        immersive: false,
+      });
+    },
     setTool: (tool) => set({ tool }),
     setError: (error) => set({ error }),
 
@@ -605,8 +643,13 @@ export const useStore = create<AppState>()((set, get) => {
       const durationMs = loadPrefs().photoDurationMs;
       await loadPhotos(
         files.map((file) => ({ file, durationMs })),
-        { append: wasPhotos },
+        { append: wasPhotos, mode: 'gif' },
       );
+    },
+
+    importPhoto: async (file) => {
+      const durationMs = loadPrefs().photoDurationMs;
+      await loadPhotos([{ file, durationMs }], { append: false, mode: 'photo' });
     },
 
     importVideo: async (file) => {
@@ -614,6 +657,7 @@ export const useStore = create<AppState>()((set, get) => {
     },
 
     reset: () => {
+      const mode = get().appMode ?? 'gif';
       clearMedia();
       const fresh = loadPrefs();
       set({
@@ -632,7 +676,8 @@ export const useStore = create<AppState>()((set, get) => {
           fitMode: fresh.fitMode,
           background: fresh.background,
         },
-        ...freshEdits(),
+        ...freshEdits(mode),
+        appMode: mode,
         fps: fresh.fps,
         quality: fresh.quality,
         estimating: false,
@@ -658,6 +703,7 @@ export const useStore = create<AppState>()((set, get) => {
           name: trimmed,
           savedAt: Date.now(),
           kind: data.kind,
+          mode: state.appMode ?? 'gif',
           thumb: await renderThumbnail(state),
           bytes: projectBytes(data),
           durationMs: selectPlan(state).durationMs,
@@ -714,7 +760,7 @@ export const useStore = create<AppState>()((set, get) => {
       } else {
         await loadPhotos(
           data.photos.map((photo) => ({ file: files[photo.file], durationMs: photo.durationMs })),
-          { append: false, restore: data.edits },
+          { append: false, restore: data.edits, mode: data.mode ?? 'gif' },
         );
       }
       // Only a project that actually opened is "the saved project".
@@ -935,11 +981,34 @@ export const useStore = create<AppState>()((set, get) => {
         effect,
         strength: 0.6,
         range: null,
-        keyframes: [{ t: 0, x: 0.5, y: 0.45, w: 0.34, h: 0.34 }],
+        keyframes: [
+          effect === 'black'
+            ? { t: 0, x: 0.5, y: 0.45, w: 0.56, h: 0.12 }
+            : { t: 0, x: 0.5, y: 0.45, w: 0.34, h: 0.34 },
+        ],
       };
       set({
         censors: [...get().censors, region],
         selectedOverlayId: region.id,
+        result: null,
+        estimate: null,
+      });
+    },
+
+    duplicateCensor: (id, timeMs) => {
+      const source = get().censors.find((region) => region.id === id);
+      if (!source) return;
+      const here = censorRectAt(source, timeMs);
+      const copy: CensorRegion = {
+        ...source,
+        id: uid(),
+        range: source.range && { ...source.range },
+        // A small offset makes the copy visible and preserves its exact size.
+        keyframes: [{ t: 0, ...here, x: clamp(here.x + 0.04, 0, 1), y: clamp(here.y + 0.04, 0, 1) }],
+      };
+      set({
+        censors: [...get().censors, copy],
+        selectedOverlayId: copy.id,
         result: null,
         estimate: null,
       });
@@ -1019,6 +1088,9 @@ export const useStore = create<AppState>()((set, get) => {
       savePrefs({ quality });
       set({ quality, estimate: null });
     },
+
+    setPhotoQuality: (photoQuality) =>
+      set({ photoQuality: Math.round(clamp(photoQuality, 1, 100)) }),
 
     ensurePreviewCache: async () => {
       const state = get();

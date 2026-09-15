@@ -9,6 +9,7 @@ import type { CensorEffect, CensorShape } from '../../state/types';
 const EFFECTS: Array<{ value: CensorEffect; label: string }> = [
   { value: 'blur', label: 'Blur' },
   { value: 'pixelate', label: 'Pixelate' },
+  { value: 'black', label: 'Black' },
 ];
 
 const SHAPES: Array<{ value: CensorShape; label: string }> = [
@@ -27,15 +28,18 @@ const snap = (value: number): number => Math.round(value * 1e4) / 1e4;
 export function CensorPanel({
   playheadMs,
   durationMs,
+  staticImage = false,
 }: {
   playheadMs: number;
   durationMs: number;
+  staticImage?: boolean;
 }) {
   const censors = useStore((state) => state.censors);
   const selectedId = useStore((state) => state.selectedOverlayId);
   const addCensor = useStore((state) => state.addCensor);
   const updateCensor = useStore((state) => state.updateCensor);
   const removeCensor = useStore((state) => state.removeCensor);
+  const duplicateCensor = useStore((state) => state.duplicateCensor);
   const selectOverlay = useStore((state) => state.selectOverlay);
   const setCensorRect = useStore((state) => state.setCensorRect);
   const addKeyframe = useStore((state) => state.addCensorKeyframe);
@@ -72,6 +76,9 @@ export function CensorPanel({
           <button type="button" className="chip-btn" onClick={() => addCensor('pixelate', 'rect')}>
             + Pixelate box
           </button>
+          <button type="button" className="chip-btn" onClick={() => addCensor('black', 'rect')}>
+            + Black bar
+          </button>
           <button type="button" className="chip-btn" onClick={() => addCensor('blur', 'circle')}>
             + Blur circle
           </button>
@@ -97,14 +104,29 @@ export function CensorPanel({
                   style={{ textAlign: 'left' }}
                   onClick={() => selectOverlay(region.id)}
                 >
-                  {index + 1}. {region.effect === 'blur' ? 'Blur' : 'Pixelate'}{' '}
+                  {index + 1}.{' '}
+                  {region.effect === 'blur'
+                    ? 'Blur'
+                    : region.effect === 'pixelate'
+                      ? 'Pixelate'
+                      : 'Black'}{' '}
                   {region.shape === 'circle' ? 'circle' : 'box'}
                   {region.keyframes.length > 1 ? ` · ${region.keyframes.length} keyframes` : ''}
                 </button>
                 <button
                   type="button"
+                  className="icon-btn"
+                  style={{ flex: 'none', width: 44 }}
+                  onClick={() => duplicateCensor(region.id, playheadMs)}
+                  aria-label={`Duplicate region ${index + 1}`}
+                  title="Duplicate"
+                >
+                  ⧉
+                </button>
+                <button
+                  type="button"
                   className="icon-btn danger"
-                  style={{ flex: 'none', width: 72 }}
+                  style={{ flex: 'none', width: 64 }}
                   onClick={() => removeCensor(region.id)}
                 >
                   Delete
@@ -145,18 +167,20 @@ export function CensorPanel({
             />
           </Field>
 
-          <Field label="Strength" value={`${Math.round(selected.strength * 100)}%`}>
-            <input
-              type="range"
-              min={0}
-              max={100}
-              value={Math.round(selected.strength * 100)}
-              aria-label="Censor strength"
-              onChange={(event) =>
-                updateCensor(selected.id, { strength: Number(event.target.value) / 100 })
-              }
-            />
-          </Field>
+          {selected.effect !== 'black' && (
+            <Field label="Strength" value={`${Math.round(selected.strength * 100)}%`}>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={Math.round(selected.strength * 100)}
+                aria-label="Censor strength"
+                onChange={(event) =>
+                  updateCensor(selected.id, { strength: Number(event.target.value) / 100 })
+                }
+              />
+            </Field>
+          )}
 
           <Field
             label="Position"
@@ -235,7 +259,7 @@ export function CensorPanel({
             </div>
           </Field>
 
-          <Field label="Follow movement" value={`${selected.keyframes.length} keyframe${selected.keyframes.length === 1 ? '' : 's'}`}>
+          {!staticImage && <Field label="Follow movement" value={`${selected.keyframes.length} keyframe${selected.keyframes.length === 1 ? '' : 's'}`}>
             <div className="chips">
               <button
                 type="button"
@@ -265,14 +289,16 @@ export function CensorPanel({
                 ))}
               </div>
             )}
-          </Field>
+          </Field>}
 
-          <TimeRangeField
-            range={selected.range}
-            durationMs={durationMs}
-            playheadMs={playheadMs}
-            onChange={(range) => updateCensor(selected.id, { range })}
-          />
+          {!staticImage && (
+            <TimeRangeField
+              range={selected.range}
+              durationMs={durationMs}
+              playheadMs={playheadMs}
+              onChange={(range) => updateCensor(selected.id, { range })}
+            />
+          )}
         </>
       )}
     </>

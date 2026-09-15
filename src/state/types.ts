@@ -1,6 +1,7 @@
 /** Domain model for the whole editor. Kept free of React so it can be unit tested. */
 
 export type SourceKind = 'photos' | 'video';
+export type ProjectMode = 'gif' | 'photo';
 
 export interface PhotoAsset {
   id: string;
@@ -97,7 +98,7 @@ export interface Sticker {
 }
 
 export type CensorShape = 'rect' | 'circle';
-export type CensorEffect = 'blur' | 'pixelate';
+export type CensorEffect = 'blur' | 'pixelate' | 'black';
 
 /**
  * A censor position at a point in time. Regions always hold at least one
