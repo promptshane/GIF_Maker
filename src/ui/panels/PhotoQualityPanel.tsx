@@ -1,13 +1,14 @@
 import { Field } from '../common';
 import { useStore } from '../../state/store';
+import { useRenderSettings } from '../../state/hooks';
 import { getPhotoExportProfile } from '../../export/photo';
 import { formatBytesShort } from '../../lib/format';
 
 export function PhotoQualityPanel({ bytes }: { bytes?: number }) {
   const quality = useStore((state) => state.photoQuality);
   const setQuality = useStore((state) => state.setPhotoQuality);
-  const canvas = useStore((state) => state.canvas);
-  const profile = getPhotoExportProfile(quality, canvas.width, canvas.height);
+  const settings = useRenderSettings();
+  const profile = getPhotoExportProfile(quality, settings.width, settings.height);
 
   return (
     <>
@@ -39,7 +40,7 @@ export function PhotoQualityPanel({ bytes }: { bytes?: number }) {
 
       <div className="hint">
         This is a live export preview. Lower values reduce both JPEG detail and pixel dimensions;
-        100% keeps the current canvas size.
+        100% keeps the imported photo's native size.
       </div>
     </>
   );

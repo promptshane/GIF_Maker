@@ -4,6 +4,7 @@ import { listProjects, storageEstimate } from '../state/projectsDb';
 import type { SavedProjectMeta } from '../state/projects';
 import { formatBytesShort, formatDuration } from '../lib/format';
 import type { ProjectMode } from '../state/types';
+import { setPreserveOriginalPhotoDecoding } from '../media/images';
 
 export function ImportScreen({ mode = 'gif' }: { mode?: ProjectMode }) {
   const photoInput = useRef<HTMLInputElement | null>(null);
@@ -12,6 +13,13 @@ export function ImportScreen({ mode = 'gif' }: { mode?: ProjectMode }) {
   const importVideo = useStore((state) => state.importVideo);
   const importPhoto = useStore((state) => state.importPhoto);
   const projectsSupported = useStore((state) => state.projectsSupported);
+
+  useEffect(() => {
+    // A single still can safely keep its native bitmap. Multi-photo GIF
+    // projects retain the capped decode path to avoid exhausting mobile Safari.
+    setPreserveOriginalPhotoDecoding(mode === 'photo');
+    return () => setPreserveOriginalPhotoDecoding(false);
+  }, [mode]);
 
   return (
     <div className="import">

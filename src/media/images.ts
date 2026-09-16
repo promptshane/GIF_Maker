@@ -1,12 +1,23 @@
 import { MediaError } from './errors';
 
 /**
- * Longest edge kept for an imported photo. iPhone photos are ~12MP, which is
- * ~48MB per decoded bitmap; a dozen of those will crash mobile Safari. GIF
- * output never exceeds ~1024px, so 2048 keeps ample headroom for cropping.
+ * Longest edge kept for photos imported into GIF projects. iPhone photos are
+ * ~12MP, which is ~48MB per decoded bitmap; a dozen of those can crash mobile
+ * Safari. The Photo Editor opts out of this cap so a single still keeps its
+ * native dimensions and detail.
  */
 export const MAX_PHOTO_EDGE = 2048;
 export const THUMB_EDGE = 200;
+
+let preserveOriginalPhotoDecoding = false;
+
+/**
+ * The import screen sets this while the single-photo editor is active. GIF
+ * projects keep the memory-safe decode cap above.
+ */
+export function setPreserveOriginalPhotoDecoding(preserve: boolean): void {
+  preserveOriginalPhotoDecoding = preserve;
+}
 
 const looksHeic = (file: File): boolean =>
   /hei[cf]/i.test(file.type) || /\.(heic|heif)$/i.test(file.name);
@@ -90,9 +101,16 @@ function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality?: number)
   });
 }
 
-/** Decodes one image file into a size-capped bitmap plus a film-strip thumbnail. */
+/**
+ * Decodes one image file plus a film-strip thumbnail. GIF projects retain the
+ * 2048px memory cap; the single-photo editor keeps the source at native size.
+ */
 export async function decodePhotoFile(file: File): Promise<DecodedPhoto> {
   if (file.size === 0) throw new MediaError(`“${file.name}” is empty.`);
+
+  // Snapshot this before any async work so leaving the import screen while a
+  // decode is finishing cannot change that file's decode policy mid-flight.
+  const preserveOriginal = preserveOriginalPhotoDecoding;
 
   let source: HTMLImageElement | ImageBitmap;
   try {
@@ -108,24 +126,49 @@ export async function decodePhotoFile(file: File): Promise<DecodedPhoto> {
   const srcW = source instanceof ImageBitmap ? source.width : source.naturalWidth;
   const srcH = source instanceof ImageBitmap ? source.height : source.naturalHeight;
   if (!srcW || !srcH) {
+    if (source instanceof ImageBitmap) source.close();
     throw new MediaError(`“${file.name}” has no image data.`, 'The file may be damaged.');
   }
 
+  let sourceOwnedByResult = false;
   try {
-    const full = drawToCanvas(source, srcW, srcH, MAX_PHOTO_EDGE);
-    const image = await createImageBitmap(full);
-    const thumb = drawToCanvas(full, full.width, full.height, THUMB_EDGE);
-    const thumbBlob = await canvasToBlob(thumb, 'image/jpeg', 0.8);
-    // Release the intermediate canvases promptly; Safari is slow to GC them.
-    full.width = full.height = 1;
-    thumb.width = thumb.height = 1;
-    return {
-      image,
-      width: image.width,
-      height: image.height,
-      thumbUrl: URL.createObjectURL(thumbBlob),
-    };
+    let image: ImageBitmap;
+    if (preserveOriginal) {
+      // Avoid routing the full-resolution still through another full-size
+      // canvas. That would briefly hold several 12MP copies in memory at once.
+      if (source instanceof ImageBitmap) {
+        image = source;
+        sourceOwnedByResult = true;
+      } else {
+        image = await createImageBitmap(source);
+      }
+    } else {
+      const full = drawToCanvas(source, srcW, srcH, MAX_PHOTO_EDGE);
+      try {
+        image = await createImageBitmap(full);
+      } finally {
+        // Release the intermediate canvas promptly; Safari is slow to GC it.
+        full.width = full.height = 1;
+      }
+    }
+
+    const thumb = drawToCanvas(source, srcW, srcH, THUMB_EDGE);
+    try {
+      const thumbBlob = await canvasToBlob(thumb, 'image/jpeg', 0.8);
+      return {
+        image,
+        width: image.width,
+        height: image.height,
+        thumbUrl: URL.createObjectURL(thumbBlob),
+      };
+    } catch (error) {
+      image.close();
+      sourceOwnedByResult = false;
+      throw error;
+    } finally {
+      thumb.width = thumb.height = 1;
+    }
   } finally {
-    if (source instanceof ImageBitmap) source.close();
+    if (source instanceof ImageBitmap && !sourceOwnedByResult) source.close();
   }
 }

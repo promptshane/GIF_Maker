@@ -9,6 +9,7 @@ import {
 } from '../render/timeline';
 import type { RenderSettings } from '../export/renderPipeline';
 import { editsSnapshot } from './projects';
+import { FULL_CROP } from '../render/geometry';
 
 /**
  * The frame plan, memoised on its real inputs.
@@ -41,23 +42,28 @@ export function useFramePlan(): FramePlan {
 }
 
 export function useRenderSettings(): RenderSettings {
+  const appMode = useStore((state) => state.appMode);
+  const firstPhoto = useStore((state) => state.photos[0] ?? null);
   const canvas = useStore((state) => state.canvas);
   const crop = useStore((state) => state.crop);
   const stickers = useStore((state) => state.stickers);
   const censors = useStore((state) => state.censors);
 
-  return useMemo(
-    () => ({
-      width: canvas.width,
-      height: canvas.height,
-      fitMode: canvas.fitMode,
-      crop,
+  return useMemo(() => {
+    // The Photo Editor starts from the imported file itself: native pixel
+    // dimensions, the complete frame, and no automatic cover-crop. GIF/video
+    // projects continue to use their configurable output canvas unchanged.
+    const nativePhoto = appMode === 'photo' ? firstPhoto : null;
+    return {
+      width: nativePhoto?.width ?? canvas.width,
+      height: nativePhoto?.height ?? canvas.height,
+      fitMode: nativePhoto ? 'fit' : canvas.fitMode,
+      crop: nativePhoto ? FULL_CROP : crop,
       background: canvas.background,
       stickers,
       censors,
-    }),
-    [canvas, crop, stickers, censors],
-  );
+    };
+  }, [appMode, firstPhoto, canvas, crop, stickers, censors]);
 }
 
 /** Pixel size of the source the crop is framed against (video, or first photo). */
