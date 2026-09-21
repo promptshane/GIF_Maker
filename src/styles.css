@@ -260,6 +260,10 @@ button {
   border: 1px solid var(--line);
   text-align: left;
   min-height: 64px;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: pan-y;
 }
 .project-open:active { background: var(--bg-input); }
 .project-thumb {

@@ -159,6 +159,34 @@ export function toProjectData(id: string, state: ProjectSource): SavedProjectDat
 export const projectBytes = (data: SavedProjectData): number =>
   data.files.reduce((sum, file) => sum + file.blob.size, 0);
 
+/**
+ * Builds an independent saved-project record from an existing one. Media Blobs
+ * are immutable and can be reused, while every mutable edit/list structure is
+ * copied so later saves to the duplicate cannot alter the original record.
+ */
+export function duplicateProjectRecords(
+  meta: SavedProjectMeta,
+  data: SavedProjectData,
+  id: string,
+  savedAt = Date.now(),
+): { meta: SavedProjectMeta; data: SavedProjectData } {
+  return {
+    meta: {
+      ...meta,
+      id,
+      name: `${meta.name} copy`,
+      savedAt,
+    },
+    data: {
+      ...data,
+      id,
+      files: data.files.map((file) => ({ ...file })),
+      photos: data.photos.map((photo) => ({ ...photo })),
+      edits: pickEdits(data.edits),
+    },
+  };
+}
+
 /** A name to suggest when a project is first saved. */
 export function defaultProjectName(state: Pick<ProjectSource, 'kind' | 'photos' | 'video'>): string {
   const base =

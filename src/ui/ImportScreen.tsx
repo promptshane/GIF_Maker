@@ -5,6 +5,7 @@ import type { SavedProjectMeta } from '../state/projects';
 import { formatBytesShort, formatDuration } from '../lib/format';
 import type { ProjectMode } from '../state/types';
 import { setPreserveOriginalPhotoDecoding } from '../media/images';
+import { Sheet } from './common';
 
 export function ImportScreen({ mode = 'gif' }: { mode?: ProjectMode }) {
   const photoInput = useRef<HTMLInputElement | null>(null);
@@ -102,9 +103,11 @@ export function ImportScreen({ mode = 'gif' }: { mode?: ProjectMode }) {
  */
 export function SavedProjects({ mode }: { mode: ProjectMode }) {
   const openProject = useStore((state) => state.openProject);
+  const duplicateProject = useStore((state) => state.duplicateProject);
   const deleteProject = useStore((state) => state.deleteProject);
   const [projects, setProjects] = useState<SavedProjectMeta[] | null>(null);
   const [storage, setStorage] = useState<{ usage: number; quota: number } | null>(null);
+  const [actionsFor, setActionsFor] = useState<SavedProjectMeta | null>(null);
 
   const refresh = () => {
     listProjects().then(
@@ -128,6 +131,7 @@ export function SavedProjects({ mode }: { mode: ProjectMode }) {
           key={project.id}
           project={project}
           onOpen={() => void openProject(project.id)}
+          onLongPress={() => setActionsFor(project)}
           onDelete={() => {
             if (confirm(`Delete “${project.name}” from this device? Its media goes with it.`)) {
               void deleteProject(project.id).then(refresh);
@@ -141,6 +145,32 @@ export function SavedProjects({ mode }: { mode: ProjectMode }) {
           to this app.
         </div>
       )}
+      <Sheet open={actionsFor !== null} onClose={() => setActionsFor(null)} labelledBy="project-actions-title">
+        <h2 id="project-actions-title">{actionsFor?.name}</h2>
+        <p className="sheet-sub">
+          Duplicate this saved project so you can edit and save the copy without changing the original.
+        </p>
+        <button
+          type="button"
+          className="cta"
+          onClick={() => {
+            const id = actionsFor?.id;
+            if (!id) return;
+            setActionsFor(null);
+            void duplicateProject(id).then(refresh);
+          }}
+        >
+          Duplicate project
+        </button>
+        <button
+          type="button"
+          className="ghost-btn"
+          style={{ width: '100%', marginTop: 8 }}
+          onClick={() => setActionsFor(null)}
+        >
+          Cancel
+        </button>
+      </Sheet>
     </section>
   );
 }
@@ -148,13 +178,25 @@ export function SavedProjects({ mode }: { mode: ProjectMode }) {
 function ProjectRow({
   project,
   onOpen,
+  onLongPress,
   onDelete,
 }: {
   project: SavedProjectMeta;
   onOpen: () => void;
+  onLongPress: () => void;
   onDelete: () => void;
 }) {
   const [thumbUrl, setThumbUrl] = useState<string | null>(null);
+  const longPressTimer = useRef<number | null>(null);
+  const longPressTriggered = useRef(false);
+  const pressStart = useRef<{ x: number; y: number } | null>(null);
+
+  const cancelLongPress = () => {
+    if (longPressTimer.current !== null) window.clearTimeout(longPressTimer.current);
+    longPressTimer.current = null;
+    pressStart.current = null;
+  };
+  useEffect(() => cancelLongPress, []);
   useEffect(() => {
     if (!project.thumb) return;
     const url = URL.createObjectURL(project.thumb);
@@ -175,7 +217,45 @@ function ProjectRow({
 
   return (
     <div className="project-row">
-      <button type="button" className="project-open" onClick={onOpen} aria-label={`Open ${project.name}`}>
+      <button
+        type="button"
+        className="project-open"
+        aria-label={`Open ${project.name}`}
+        title="Hold to duplicate"
+        onPointerDown={(event) => {
+          if (event.pointerType === 'mouse' && event.button !== 0) return;
+          cancelLongPress();
+          longPressTriggered.current = false;
+          pressStart.current = { x: event.clientX, y: event.clientY };
+          longPressTimer.current = window.setTimeout(() => {
+            longPressTimer.current = null;
+            longPressTriggered.current = true;
+            onLongPress();
+          }, 600);
+        }}
+        onPointerMove={(event) => {
+          const start = pressStart.current;
+          if (!start) return;
+          if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > 10) cancelLongPress();
+        }}
+        onPointerUp={cancelLongPress}
+        onPointerCancel={cancelLongPress}
+        onPointerLeave={cancelLongPress}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          cancelLongPress();
+          longPressTriggered.current = true;
+          onLongPress();
+        }}
+        onClick={(event) => {
+          if (longPressTriggered.current) {
+            longPressTriggered.current = false;
+            event.preventDefault();
+            return;
+          }
+          onOpen();
+        }}
+      >
         <span className="project-thumb" aria-hidden="true">
           {thumbUrl ? <img src={thumbUrl} alt="" /> : project.kind === 'video' ? '🎬' : '🖼️'}
         </span>

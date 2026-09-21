@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   PROJECT_VERSION,
   defaultProjectName,
+  duplicateProjectRecords,
   editsSnapshot,
   projectBytes,
   toFiles,
@@ -98,6 +99,41 @@ describe('project serialisation', () => {
       defaultProjectName({ kind: 'video', photos: [], video: { name: 'IMG_0042.MOV', type: '', file: new Blob() } }),
     ).toBe('IMG_0042');
     expect(defaultProjectName({ kind: 'photos', photos: [], video: null })).toBe('Project');
+  });
+});
+
+describe('project duplication', () => {
+  it('gives the copy a new identity and independent mutable edit data', () => {
+    const source: ProjectSource = {
+      kind: 'photos',
+      photos: [photo('p1', new Blob(['a'], { type: 'image/jpeg' }), 300)],
+      video: null,
+      ...edits(),
+    };
+    const data = toProjectData('original', source);
+    const meta = {
+      id: 'original',
+      name: 'Poster',
+      savedAt: 10,
+      kind: 'photos' as const,
+      mode: 'photo' as const,
+      thumb: null,
+      bytes: projectBytes(data),
+      durationMs: 300,
+      photoCount: 1,
+    };
+
+    const copy = duplicateProjectRecords(meta, data, 'copy', 20);
+    expect(copy.meta).toMatchObject({ id: 'copy', name: 'Poster copy', savedAt: 20 });
+    expect(copy.data.id).toBe('copy');
+    expect(copy.data.files[0].blob).toBe(data.files[0].blob);
+
+    copy.data.photos[0].durationMs = 999;
+    copy.data.edits.crop.x = 0.7;
+    copy.data.edits.censors[0].keyframes[0].x = 0.8;
+    expect(data.photos[0].durationMs).toBe(300);
+    expect(data.edits.crop.x).toBe(0.1);
+    expect(data.edits.censors[0].keyframes[0].x).toBe(0.4);
   });
 });
 

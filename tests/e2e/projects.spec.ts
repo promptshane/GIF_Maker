@@ -163,6 +163,39 @@ test.describe('Saved projects', () => {
     await expect(page.locator('.project-row', { hasText: 'Three frames' })).toHaveCount(0);
   });
 
+  test('holding a saved project offers an independent duplicate', async ({ page }) => {
+    await openApp(page);
+    await importPhotos(page, [PHOTOS[0]]);
+    await saveAs(page, 'Original');
+
+    page.on('dialog', (dialog) => void dialog.accept());
+    await page.getByLabel('Start over').click();
+    const original = page.getByRole('button', { name: 'Open Original' });
+    await expect(original).toBeVisible();
+
+    await original.dispatchEvent('pointerdown', {
+      pointerType: 'touch',
+      button: 0,
+      clientX: 20,
+      clientY: 20,
+    });
+    await page.waitForTimeout(650);
+    await original.dispatchEvent('pointerup', {
+      pointerType: 'touch',
+      button: 0,
+      clientX: 20,
+      clientY: 20,
+    });
+
+    const actions = page.getByRole('dialog', { name: 'Original' });
+    await expect(actions.getByRole('button', { name: 'Duplicate project' })).toBeVisible();
+    await actions.getByRole('button', { name: 'Duplicate project' }).click();
+    await expect(page.locator('.busy-veil')).toBeHidden({ timeout: 60_000 });
+
+    await expect(page.getByRole('button', { name: 'Open Original' })).toHaveCount(1);
+    await expect(page.getByRole('button', { name: 'Open Original copy' })).toHaveCount(1);
+  });
+
   test('starting over from a saved project keeps it saved', async ({ page }) => {
     await openApp(page);
     await importPhotos(page, [PHOTOS[2]]);

@@ -55,6 +55,7 @@ import { FrameRenderer, renderPaletteSamples, type RenderSettings } from '../exp
 import { uid } from '../lib/format';
 import {
   defaultProjectName,
+  duplicateProjectRecords,
   editsSnapshot,
   projectBytes,
   toFiles,
@@ -160,6 +161,8 @@ interface AppState {
   saveProject: (name: string) => Promise<boolean>;
   /** Reopens a saved project in an editable state. */
   openProject: (id: string) => Promise<void>;
+  /** Makes a separately saved copy that can be edited without changing the original. */
+  duplicateProject: (id: string) => Promise<boolean>;
   deleteProject: (id: string) => Promise<void>;
 
   reorderPhotos: (from: number, to: number) => void;
@@ -776,6 +779,35 @@ export const useStore = create<AppState>()((set, get) => {
         if (get().projectId === id) set({ projectId: null, projectName: null, savedSnapshot: null });
       } catch (error) {
         set({ error: { message: 'The project could not be deleted.', hint: describeError(error).message } });
+      }
+    },
+
+    duplicateProject: async (id) => {
+      set({ busy: { label: 'Duplicating project…' }, error: null });
+      try {
+        const [meta, data] = await Promise.all([getProjectMeta(id), getProject(id)]);
+        if (!meta || !data) throw new Error('That project is no longer in storage.');
+
+        const copyId = uid();
+        const copy = duplicateProjectRecords(meta, data, copyId);
+        await putProject(copy.meta, copy.data);
+        void requestPersistence();
+        set({ busy: null });
+        return true;
+      } catch (error) {
+        set({
+          busy: null,
+          error: isQuotaError(error)
+            ? {
+                message: 'There is not enough storage to duplicate this project.',
+                hint: 'Delete an older project from the home screen, or free up space on this device.',
+              }
+            : {
+                message: 'The project could not be duplicated.',
+                hint: describeError(error).message,
+              },
+        });
+        return false;
       }
     },
 
