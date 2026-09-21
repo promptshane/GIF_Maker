@@ -175,11 +175,17 @@ describe('overlay timing', () => {
       ],
     };
     expect(censorRectAt(region, 0)).toEqual({ x: 0.1, y: 0.2, w: 0.1, h: 0.1 });
+    const quarter = censorRectAt(region, 250);
     const mid = censorRectAt(region, 500);
+    const threeQuarter = censorRectAt(region, 750);
+    expect(quarter.w).toBeCloseTo(0.2, 6);
+    expect(mid.w).toBeCloseTo(0.3, 6);
+    expect(threeQuarter.w).toBeCloseTo(0.4, 6);
+    expect(quarter.h).toBeCloseTo(0.15, 6);
+    expect(mid.h).toBeCloseTo(0.2, 6);
+    expect(threeQuarter.h).toBeCloseTo(0.25, 6);
     expect(mid.x).toBeCloseTo(0.5, 6);
     expect(mid.y).toBeCloseTo(0.4, 6);
-    expect(mid.w).toBeCloseTo(0.3, 6);
-    expect(mid.h).toBeCloseTo(0.2, 6);
     // Clamped outside the keyframe range rather than extrapolated.
     expect(censorRectAt(region, 5000)).toEqual({ x: 0.9, y: 0.6, w: 0.5, h: 0.3 });
   });

@@ -22,8 +22,12 @@ const STEP = 0.01;
 const MIN_SIZE = 0.02;
 const MAX_SIZE = 1.5;
 
-/** Keeps stepped values on exact hundredths, so a step back lands exactly where it started. */
+/** Keeps stepped values stable while still allowing 0.1%-level slider precision. */
 const snap = (value: number): number => Math.round(value * 1e4) / 1e4;
+const formatSizePercent = (value: number): string => {
+  const percent = Math.round(value * 1000) / 10;
+  return Number.isInteger(percent) ? `${percent}%` : `${percent.toFixed(1)}%`;
+};
 
 export function CensorPanel({
   playheadMs,
@@ -182,7 +186,7 @@ export function CensorPanel({
             </Field>
           )}
 
-          <Field label="Size" value={`${Math.round(rect.w * 100)}% × ${Math.round(rect.h * 100)}%`}>
+          <Field label="Size" value={`${formatSizePercent(rect.w)} × ${formatSizePercent(rect.h)}`}>
             <div className="size-axis-label">Horizontal</div>
             <div className="stepper-row">
               <RepeatButton
@@ -196,7 +200,8 @@ export function CensorPanel({
                 type="range"
                 min={2}
                 max={150}
-                value={Math.round(rect.w * 100)}
+                step={0.1}
+                value={rect.w * 100}
                 aria-label="Censor width"
                 onChange={(event) => resize({ w: Number(event.target.value) / 100 })}
               />
@@ -221,7 +226,8 @@ export function CensorPanel({
                 type="range"
                 min={2}
                 max={150}
-                value={Math.round(rect.h * 100)}
+                step={0.1}
+                value={rect.h * 100}
                 aria-label="Censor height"
                 onChange={(event) => resize({ h: Number(event.target.value) / 100 })}
               />

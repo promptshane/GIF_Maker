@@ -46,6 +46,60 @@ export function pixelBlockSize(strength: number, canvasShortSide: number): numbe
   return Math.max(1, canvasShortSide * (0.01 + 0.09 * s * s));
 }
 
+export interface CensorPixelGeometry {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  left: number;
+  top: number;
+  clipW: number;
+  clipH: number;
+  sampleX: number;
+  sampleY: number;
+  sampleW: number;
+  sampleH: number;
+}
+
+/**
+ * Converts a normalised censor rectangle to canvas pixels without quantising
+ * its visible boundary. Scratch processing still samples whole pixels, but the
+ * final clip can grow/shrink fractionally from frame to frame instead of waiting
+ * for the next rounded pixel and appearing to snap.
+ */
+export function censorPixelGeometry(
+  r: { x: number; y: number; w: number; h: number },
+  width: number,
+  height: number,
+): CensorPixelGeometry {
+  const w = clamp(r.w, 0.005, 2) * width;
+  const h = clamp(r.h, 0.005, 2) * height;
+  const x = r.x * width - w / 2;
+  const y = r.y * height - h / 2;
+  const left = clamp(x, 0, width);
+  const top = clamp(y, 0, height);
+  const right = clamp(x + w, 0, width);
+  const bottom = clamp(y + h, 0, height);
+  const sampleX = clamp(Math.floor(left), 0, width);
+  const sampleY = clamp(Math.floor(top), 0, height);
+  const sampleRight = clamp(Math.ceil(right), 0, width);
+  const sampleBottom = clamp(Math.ceil(bottom), 0, height);
+  return {
+    x,
+    y,
+    w,
+    h,
+    left,
+    top,
+    clipW: Math.max(0, right - left),
+    clipH: Math.max(0, bottom - top),
+    sampleX,
+    sampleY,
+    sampleW: Math.max(0, sampleRight - sampleX),
+    sampleH: Math.max(0, sampleBottom - sampleY),
+  };
+}
+
 let canvasFilterSupport: boolean | null = null;
 
 /**
@@ -159,17 +213,11 @@ export class Compositor {
     for (const region of censors) {
       if (!isActiveAt(region.range, timeMs)) continue;
       const r = censorRectAt(region, timeMs);
-      const w = Math.round(clamp(r.w, 0.005, 2) * width);
-      const h = Math.round(clamp(r.h, 0.005, 2) * height);
-      const x = Math.round(r.x * width - w / 2);
-      const y = Math.round(r.y * height - h / 2);
+      const g = censorPixelGeometry(r, width, height);
 
-      // Clip to the visible canvas; a fully off-canvas region is a no-op.
-      const cx = clamp(x, 0, width);
-      const cy = clamp(y, 0, height);
-      const cw = Math.floor(clamp(x + w, 0, width) - cx);
-      const ch = Math.floor(clamp(y + h, 0, height) - cy);
-      if (cw < 1 || ch < 1) continue;
+      // The visible clip stays fractional for smooth animated resizing. The
+      // effect itself samples the smallest whole-pixel box covering that clip.
+      if (g.clipW <= 0 || g.clipH <= 0 || g.sampleW < 1 || g.sampleH < 1) continue;
 
       if (region.effect === 'black') {
         ctx.save();
@@ -177,16 +225,16 @@ export class Compositor {
         ctx.beginPath();
         if (region.shape === 'circle') {
           ctx.ellipse(
-            x + w / 2,
-            y + h / 2,
-            Math.max(0.5, w / 2),
-            Math.max(0.5, h / 2),
+            g.x + g.w / 2,
+            g.y + g.h / 2,
+            Math.max(0.5, g.w / 2),
+            Math.max(0.5, g.h / 2),
             0,
             0,
             Math.PI * 2,
           );
         } else {
-          ctx.rect(cx, cy, cw, ch);
+          ctx.rect(g.left, g.top, g.clipW, g.clipH);
         }
         ctx.fill();
         ctx.restore();
@@ -198,21 +246,55 @@ export class Compositor {
       const base = Math.min(width, height);
       const processed =
         region.effect === 'pixelate'
-          ? this.pixelateRegion(ctx, cx, cy, cw, ch, pixelBlockSize(region.strength, base))
-          : this.blurRegion(ctx, cx, cy, cw, ch, blurRadius(region.strength, base), width, height);
+          ? this.pixelateRegion(
+              ctx,
+              g.sampleX,
+              g.sampleY,
+              g.sampleW,
+              g.sampleH,
+              pixelBlockSize(region.strength, base),
+            )
+          : this.blurRegion(
+              ctx,
+              g.sampleX,
+              g.sampleY,
+              g.sampleW,
+              g.sampleH,
+              blurRadius(region.strength, base),
+              width,
+              height,
+            );
       if (!processed) continue;
 
       ctx.save();
       ctx.beginPath();
       if (region.shape === 'circle') {
         // Ellipse inscribed in the (unclipped) region box, then clipped to canvas.
-        ctx.ellipse(x + w / 2, y + h / 2, Math.max(0.5, w / 2), Math.max(0.5, h / 2), 0, 0, Math.PI * 2);
+        ctx.ellipse(
+          g.x + g.w / 2,
+          g.y + g.h / 2,
+          Math.max(0.5, g.w / 2),
+          Math.max(0.5, g.h / 2),
+          0,
+          0,
+          Math.PI * 2,
+        );
       } else {
-        ctx.rect(cx, cy, cw, ch);
+        ctx.rect(g.left, g.top, g.clipW, g.clipH);
       }
       ctx.clip();
       ctx.imageSmoothingEnabled = region.effect !== 'pixelate';
-      ctx.drawImage(processed.canvas, processed.sx, processed.sy, cw, ch, cx, cy, cw, ch);
+      ctx.drawImage(
+        processed.canvas,
+        processed.sx,
+        processed.sy,
+        g.sampleW,
+        g.sampleH,
+        g.sampleX,
+        g.sampleY,
+        g.sampleW,
+        g.sampleH,
+      );
       ctx.restore();
     }
   }

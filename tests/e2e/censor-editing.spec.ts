@@ -39,6 +39,23 @@ test.describe('Censor editing', () => {
     await expect(page.locator('.tool-panel')).toContainText('50%, 45%');
   });
 
+  test('size sliders accept fractional percentages without snapping to whole percent', async ({ page }) => {
+    await openApp(page);
+    await importPhotos(page, [PHOTOS[0]]);
+    await openTab(page, 'Censor');
+    await page.getByRole('button', { name: '+ Blur box' }).click();
+
+    const stage = (await page.locator('.stage-inner').boundingBox())!;
+    const region = page.locator('.selection-box').first();
+    await page.getByRole('slider', { name: 'Censor width' }).fill('33.4');
+    await page.getByRole('slider', { name: 'Censor height' }).fill('27.2');
+
+    const rect = (await region.boundingBox())!;
+    expect(rect.width / stage.width).toBeCloseTo(0.334, 3);
+    expect(rect.height / stage.height).toBeCloseTo(0.272, 3);
+    await expect(page.locator('.tool-panel')).toContainText('33.4% × 27.2%');
+  });
+
   test('size steppers change one side by one step without moving the centre', async ({ page }) => {
     await openApp(page);
     await importPhotos(page, [PHOTOS[0]]);
