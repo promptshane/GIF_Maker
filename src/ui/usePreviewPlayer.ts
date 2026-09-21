@@ -22,6 +22,8 @@ export interface PreviewPlayer {
   timeMs: number;
   playing: boolean;
   setPlaying: (playing: boolean) => void;
+  /** Pauses on the exact GIF frame currently being displayed and returns its timeline time. */
+  pause: () => number;
   togglePlay: () => void;
   seek: (timeMs: number) => void;
   /** Canvas backing-store size actually used for the preview. */
@@ -189,6 +191,21 @@ export function usePreviewPlayer(
     [draw],
   );
 
+  const pause = useCallback((): number => {
+    // Stop the animation loop synchronously, before React has a chance to rerender.
+    playingRef.current = false;
+    setPlaying(false);
+    const currentPlan = planRef.current;
+    const index = frameIndexAt(currentPlan, timeRef.current);
+    // The compositor renders overlays at the planned frame's start time, so
+    // freezing there makes the editing timestamp exactly match what is visible.
+    const frozen = index >= 0 ? currentPlan.frames[index].timeMs : timeRef.current;
+    timeRef.current = frozen;
+    setTimeMs(frozen);
+    draw(frozen);
+    return frozen;
+  }, [draw]);
+
   const togglePlay = useCallback(() => setPlaying((value) => !value), []);
 
   return {
@@ -196,6 +213,7 @@ export function usePreviewPlayer(
     timeMs,
     playing,
     setPlaying,
+    pause,
     togglePlay,
     seek,
     size: { width, height },

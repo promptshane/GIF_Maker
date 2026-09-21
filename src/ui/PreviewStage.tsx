@@ -17,6 +17,9 @@ interface StageProps {
   selectedId: string | null;
   onSelect: (id: string | null) => void;
   onMoveSticker: (id: string, patch: Partial<Sticker>) => void;
+  /** Freeze playback for censor manipulation and return the exact displayed frame time. */
+  onStartCensorEdit?: () => number;
+  onEndCensorEdit?: () => void;
   onMoveCensor: (id: string, rect: { x: number; y: number; w: number; h: number }) => void;
   /** Output canvas dimensions, needed to convert sticker size to a box. */
   outputWidth: number;
@@ -187,6 +190,8 @@ function CensorLayer({
   censors,
   selectedId,
   onSelect,
+  onStartCensorEdit,
+  onEndCensorEdit,
   onMoveCensor,
 }: StageProps) {
   const visible = censors.filter((region) => isActiveAt(region.range, timeMs));
@@ -242,6 +247,8 @@ function CensorLayer({
           box={box}
           selected={region.id === selectedId}
           onSelect={() => onSelect(region.id)}
+          onEditStart={onStartCensorEdit}
+          onEditEnd={onEndCensorEdit}
           onChange={(rect) => onMoveCensor(region.id, rect)}
           peers={visible}
           onAlign={showGuides}
@@ -272,6 +279,8 @@ function CensorBox({
   box,
   selected,
   onSelect,
+  onEditStart,
+  onEditEnd,
   onChange,
   peers,
   onAlign,
@@ -281,12 +290,16 @@ function CensorBox({
   box: { width: number; height: number };
   selected: boolean;
   onSelect: () => void;
+  onEditStart?: () => number;
+  onEditEnd?: () => void;
   onChange: (rect: { x: number; y: number; w: number; h: number }) => void;
   peers: CensorRegion[];
   onAlign: (guides: { x: number | null; y: number | null }) => void;
 }) {
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const rect = censorRectAt(region, timeMs);
+  const dragRectRef = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
+  const dragTimeRef = useRef<number | null>(null);
   const [flash, setFlash] = useState(false);
 
   useEffect(() => {
@@ -301,43 +314,52 @@ function CensorBox({
   }, [selected, rect.x, rect.y, rect.w, rect.h]);
 
   useGesture(bodyRef, {
-    onStart: onSelect,
+    onStart: () => {
+      onSelect();
+      const frozen = onEditStart?.();
+      dragTimeRef.current = frozen ?? timeMs;
+      dragRectRef.current = censorRectAt(region, dragTimeRef.current);
+    },
     onMove: (info) => {
+      // Accumulate against the last gesture position rather than waiting for a
+      // React rerender between pointer events. Fast drags therefore stay 1:1
+      // with the finger/mouse instead of dropping movement and feeling elastic.
+      const base = dragRectRef.current ?? rect;
       const next = {
-        x: clamp(rect.x + info.dx / box.width, 0, 1),
-        y: clamp(rect.y + info.dy / box.height, 0, 1),
-        w: rect.w,
-        h: rect.h,
+        x: clamp(base.x + info.dx / box.width, 0, 1),
+        y: clamp(base.y + info.dy / box.height, 0, 1),
+        w: base.w,
+        h: base.h,
       };
       if (info.pointers >= 2) {
-        next.w = clamp(rect.w * info.scale, 0.02, 2);
-        next.h = clamp(rect.h * info.scale, 0.02, 2);
+        next.w = clamp(base.w * info.scale, 0.02, 2);
+        next.h = clamp(base.h * info.scale, 0.02, 2);
       }
-      // Matching-size regions magnetise very slightly at their centre lines.
-      // Six screen pixels is enough to make deliberate alignment easy without
-      // making ordinary movement feel sticky.
-      const snapX = 6 / Math.max(1, box.width);
-      const snapY = 6 / Math.max(1, box.height);
-      let alignedX = false;
-      let alignedY = false;
+      dragRectRef.current = next;
+
+      // Keep the alignment guide as a visual hint, but never alter geometry.
+      // The old implementation physically snapped matching regions together
+      // within six screen pixels, which made precise nearby placement feel magnetic.
+      const guideX = 6 / Math.max(1, box.width);
+      const guideY = 6 / Math.max(1, box.height);
+      let x: number | null = null;
+      let y: number | null = null;
+      const editTime = dragTimeRef.current ?? timeMs;
       for (const peer of peers) {
         if (peer.id === region.id) continue;
-        const there = censorRectAt(peer, timeMs);
+        const there = censorRectAt(peer, editTime);
         const sameSize = Math.abs(next.w - there.w) < 0.0005 && Math.abs(next.h - there.h) < 0.0005;
         if (!sameSize) continue;
-        if (Math.abs(next.x - there.x) <= snapX) {
-          next.x = there.x;
-          alignedX = true;
-        }
-        if (Math.abs(next.y - there.y) <= snapY) {
-          next.y = there.y;
-          alignedY = true;
-        }
+        if (Math.abs(next.x - there.x) <= guideX) x = there.x;
+        if (Math.abs(next.y - there.y) <= guideY) y = there.y;
       }
-      if (alignedX || alignedY) {
-        onAlign({ x: alignedX ? next.x : null, y: alignedY ? next.y : null });
-      }
+      if (x !== null || y !== null) onAlign({ x, y });
       onChange(next);
+    },
+    onEnd: () => {
+      dragRectRef.current = null;
+      dragTimeRef.current = null;
+      onEditEnd?.();
     },
   });
 

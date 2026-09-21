@@ -215,6 +215,35 @@ export function censorRectAt(
 }
 
 /**
+ * Applies a censor move/resize at the frame being edited.
+ *
+ * A single keyframe means a deliberately static censor, so edits keep changing
+ * that one point. Once tracking exists (2+ keyframes), editing between authored
+ * points creates a keyframe exactly there instead of pulling the nearest point
+ * away and making the interpolated region fight the pointer.
+ */
+export function editCensorRectAt(
+  region: CensorRegion,
+  timeMs: number,
+  rect: { x: number; y: number; w: number; h: number },
+): CensorRegion {
+  const keys = [...region.keyframes];
+  if (keys.length <= 1) {
+    return { ...region, keyframes: [{ t: keys[0]?.t ?? 0, ...rect }] };
+  }
+
+  const t = Math.max(0, Math.round(timeMs));
+  const existing = keys.findIndex((key) => Math.abs(key.t - t) < 1);
+  if (existing >= 0) {
+    keys[existing] = { ...keys[existing], ...rect };
+  } else {
+    keys.push({ t, ...rect });
+    keys.sort((a, b) => a.t - b.t);
+  }
+  return { ...region, keyframes: keys };
+}
+
+/**
  * Keeps censor tracking attached to the same source motion when video speed
  * changes. Censor keyframes and ranges live on the output timeline, whose
  * duration is inversely proportional to playback speed.

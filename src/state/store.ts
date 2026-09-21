@@ -33,6 +33,7 @@ import {
   buildPhotoPlan,
   buildVideoPlan,
   censorRectAt,
+  editCensorRectAt,
   mergeStaticFrames,
   retimeCensorForSpeed,
   type FramePlan,
@@ -1077,25 +1078,15 @@ export const useStore = create<AppState>()((set, get) => {
       }),
 
     /**
-     * Moves/resizes a region. With one keyframe the region stays static and the
-     * single keyframe is updated in place; with several, the keyframe nearest
-     * the current time is updated so dragging edits the point you are looking at.
+     * Moves/resizes a region at the frame being inspected. Static one-keyframe
+     * regions stay static; tracked regions get an exact keyframe when edited
+     * between existing points, so interpolation never pulls against the drag.
      */
     setCensorRect: (id, timeMs, rect) =>
       set({
-        censors: get().censors.map((region) => {
-          if (region.id !== id) return region;
-          const keys = [...region.keyframes];
-          if (keys.length <= 1) {
-            return { ...region, keyframes: [{ t: keys[0]?.t ?? 0, ...rect }] };
-          }
-          let nearest = 0;
-          for (let i = 1; i < keys.length; i++) {
-            if (Math.abs(keys[i].t - timeMs) < Math.abs(keys[nearest].t - timeMs)) nearest = i;
-          }
-          keys[nearest] = { ...keys[nearest], ...rect };
-          return { ...region, keyframes: keys };
-        }),
+        censors: get().censors.map((region) =>
+          region.id === id ? editCensorRectAt(region, timeMs, rect) : region,
+        ),
         result: null,
         estimate: null,
       }),

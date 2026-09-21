@@ -6,6 +6,7 @@ import {
   buildVideoPlan,
   censorRectAt,
   effectiveFps,
+  editCensorRectAt,
   frameIndexAt,
   isActiveAt,
   mergeStaticFrames,
@@ -181,6 +182,37 @@ describe('overlay timing', () => {
     expect(mid.h).toBeCloseTo(0.2, 6);
     // Clamped outside the keyframe range rather than extrapolated.
     expect(censorRectAt(region, 5000)).toEqual({ x: 0.9, y: 0.6, w: 0.5, h: 0.3 });
+  });
+
+  it('creates an exact keyframe when a tracked censor is edited between existing points', () => {
+    const region: CensorRegion = {
+      id: 'c', shape: 'rect', effect: 'blur', strength: 0.5, range: null,
+      keyframes: [
+        { t: 0, x: 0.2, y: 0.5, w: 0.2, h: 0.2 },
+        { t: 1000, x: 0.8, y: 0.5, w: 0.2, h: 0.2 },
+      ],
+    };
+    const moved = { x: 0.55, y: 0.2, w: 0.25, h: 0.25 };
+    const edited = editCensorRectAt(region, 500, moved);
+    expect(edited.keyframes.map((key) => key.t)).toEqual([0, 500, 1000]);
+    expect(edited.keyframes[0]).toEqual(region.keyframes[0]);
+    expect(edited.keyframes[2]).toEqual(region.keyframes[1]);
+    expect(censorRectAt(edited, 500)).toEqual(moved);
+
+    // Repeated pointer events at the same frame update that point rather than
+    // creating a pile of nearly-identical keyframes.
+    const updated = editCensorRectAt(edited, 500.4, { ...moved, x: 0.6 });
+    expect(updated.keyframes.map((key) => key.t)).toEqual([0, 500, 1000]);
+    expect(censorRectAt(updated, 500).x).toBe(0.6);
+  });
+
+  it('keeps a one-keyframe censor static when it is repositioned', () => {
+    const region: CensorRegion = {
+      id: 'c', shape: 'rect', effect: 'blur', strength: 0.5, range: null,
+      keyframes: [{ t: 0, x: 0.2, y: 0.5, w: 0.2, h: 0.2 }],
+    };
+    const edited = editCensorRectAt(region, 700, { x: 0.7, y: 0.3, w: 0.3, h: 0.3 });
+    expect(edited.keyframes).toEqual([{ t: 0, x: 0.7, y: 0.3, w: 0.3, h: 0.3 }]);
   });
 
   it('retimes keyframes and visibility ranges when playback speed changes', () => {

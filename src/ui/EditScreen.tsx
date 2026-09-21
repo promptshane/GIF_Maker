@@ -57,6 +57,9 @@ export function EditScreen() {
 
   const [cropping, setCropping] = useState(false);
   const stageRef = useRef<HTMLDivElement | null>(null);
+  // Held for the duration of a censor drag so every pointer event edits one
+  // frozen frame even if React rerenders while the gesture is in progress.
+  const censorEditTimeRef = useRef<number | null>(null);
 
   // Reframing needs the *uncropped* source, so the crop editor sizes itself to
   // the source aspect while the preview uses the output aspect.
@@ -158,7 +161,17 @@ export function EditScreen() {
             selectedId={selectedId}
             onSelect={selectOverlay}
             onMoveSticker={updateSticker}
-            onMoveCensor={(id, rect) => setCensorRect(id, player.timeMs, rect)}
+            onStartCensorEdit={() => {
+              const frozen = player.pause();
+              censorEditTimeRef.current = frozen;
+              return frozen;
+            }}
+            onEndCensorEdit={() => {
+              censorEditTimeRef.current = null;
+            }}
+            onMoveCensor={(id, rect) =>
+              setCensorRect(id, censorEditTimeRef.current ?? player.timeMs, rect)
+            }
             outputWidth={settings.width}
             outputHeight={settings.height}
           />

@@ -66,3 +66,50 @@ test('a censor region follows keyframes across the timeline', async ({ page }) =
   // interpolated rather than snapping between the two keyframes.
   expect(countPixels(frameRgb(bytes, Math.floor(frames / 2)), isBlend)).toBeGreaterThan(60);
 });
+
+
+test('editing midway through tracked motion creates a keyframe there and pauses playback', async ({ page }) => {
+  await openApp(page);
+  await importVideo(page);
+  await openTab(page, 'Edit');
+  await page.getByRole('button', { name: '10', exact: true }).click();
+  await openTab(page, 'Censor');
+  await page.getByRole('button', { name: '+ Blur box' }).click();
+
+  const scrub = page.getByRole('slider', { name: 'Preview position' });
+  const duration = Number(await scrub.getAttribute('max'));
+  const stage = (await page.locator('.stage-inner').boundingBox())!;
+  const centre = async () => {
+    const box = (await page.locator('.selection-box.censor').first().boundingBox())!;
+    return {
+      x: (box.x + box.width / 2 - stage.x) / stage.width,
+      y: (box.y + box.height / 2 - stage.y) / stage.height,
+    };
+  };
+
+  await scrub.fill('0');
+  await dragOverlayTo(page, 0.2, 0.35);
+  await scrub.fill(String(duration - 60));
+  await page.getByRole('button', { name: /Keyframe at/ }).click();
+  await dragOverlayTo(page, 0.8, 0.65);
+  await expect(page.locator('.tool-panel')).toContainText('2 keyframes');
+
+  const mid = Math.round(duration / 2);
+  await scrub.fill(String(mid));
+  await dragOverlayTo(page, 0.55, 0.2);
+  await expect(page.locator('.tool-panel')).toContainText('3 keyframes');
+  await expect(page.getByRole('button', { name: 'Play preview' })).toBeVisible();
+  let pos = await centre();
+  expect(pos.x).toBeCloseTo(0.55, 1);
+  expect(pos.y).toBeCloseTo(0.2, 1);
+
+  // Neither neighbouring keyframe was dragged away to satisfy the midpoint edit.
+  await scrub.fill('0');
+  pos = await centre();
+  expect(pos.x).toBeCloseTo(0.2, 1);
+  expect(pos.y).toBeCloseTo(0.35, 1);
+  await scrub.fill(String(duration - 60));
+  pos = await centre();
+  expect(pos.x).toBeCloseTo(0.8, 1);
+  expect(pos.y).toBeCloseTo(0.65, 1);
+});
