@@ -729,6 +729,13 @@ input[type='color'] {
   gap: 8px;
 }
 .stepper-row input[type='range'] { flex: 1; min-width: 0; }
+.size-axis-label {
+  margin: 2px 0 4px;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 600;
+}
+.stepper-row + .size-axis-label { margin-top: 9px; }
 
 .quality-scale {
   display: flex;

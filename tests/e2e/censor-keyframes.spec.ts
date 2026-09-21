@@ -40,6 +40,15 @@ test('a censor region follows keyframes across the timeline', async ({ page }) =
   await expect(page.locator('.tool-panel')).toContainText('2 keyframes');
   await dragOverlayTo(page, 0.9, 0.5);
 
+  // Changing speed after tracking is authored must keep those points attached
+  // to the same source-video motion instead of leaving them at old output times.
+  await openTab(page, 'Edit');
+  await page.getByRole('slider', { name: 'Playback speed' }).fill('0.5');
+  const slowedDuration = Number(await scrub.getAttribute('max'));
+  expect(slowedDuration).toBeGreaterThan(duration * 1.9);
+  await openTab(page, 'Censor');
+  await expect(page.locator('.tool-panel')).toContainText('2 keyframes');
+
   await generate(page);
   const bytes = await readResultGif(page);
   const { frames } = probeGif(bytes);

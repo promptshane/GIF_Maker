@@ -215,6 +215,29 @@ export function censorRectAt(
 }
 
 /**
+ * Keeps censor tracking attached to the same source motion when video speed
+ * changes. Censor keyframes and ranges live on the output timeline, whose
+ * duration is inversely proportional to playback speed.
+ */
+export function retimeCensorForSpeed(
+  region: CensorRegion,
+  oldSpeed: number,
+  newSpeed: number,
+): CensorRegion {
+  const before = Math.max(0.01, oldSpeed);
+  const after = Math.max(0.01, newSpeed);
+  const factor = before / after;
+  if (Math.abs(factor - 1) < 1e-12) return region;
+  return {
+    ...region,
+    range: region.range
+      ? { startMs: region.range.startMs * factor, endMs: region.range.endMs * factor }
+      : null,
+    keyframes: region.keyframes.map((key) => ({ ...key, t: key.t * factor })),
+  };
+}
+
+/**
  * Identifies what a frame will actually look like, ignoring pixel content that
  * cannot change (a photo shown twice in a row is byte-identical). Video frames
  * always get a unique signature because their source timestamp differs.

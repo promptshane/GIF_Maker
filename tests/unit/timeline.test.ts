@@ -9,6 +9,7 @@ import {
   frameIndexAt,
   isActiveAt,
   mergeStaticFrames,
+  retimeCensorForSpeed,
 } from '../../src/render/timeline';
 import type { CensorRegion, Sticker } from '../../src/state/types';
 
@@ -180,6 +181,26 @@ describe('overlay timing', () => {
     expect(mid.h).toBeCloseTo(0.2, 6);
     // Clamped outside the keyframe range rather than extrapolated.
     expect(censorRectAt(region, 5000)).toEqual({ x: 0.9, y: 0.6, w: 0.5, h: 0.3 });
+  });
+
+  it('retimes keyframes and visibility ranges when playback speed changes', () => {
+    const region: CensorRegion = {
+      id: 'c', shape: 'rect', effect: 'blur', strength: 0.5,
+      range: { startMs: 250, endMs: 1500 },
+      keyframes: [
+        { t: 0, x: 0.2, y: 0.5, w: 0.2, h: 0.2 },
+        { t: 1000, x: 0.8, y: 0.5, w: 0.2, h: 0.2 },
+      ],
+    };
+    const slowed = retimeCensorForSpeed(region, 1, 0.5);
+    expect(slowed.range).toEqual({ startMs: 500, endMs: 3000 });
+    expect(slowed.keyframes.map((key) => key.t)).toEqual([0, 2000]);
+    // Geometry is untouched; only its output-timeline timestamps move.
+    expect(slowed.keyframes[1].x).toBe(0.8);
+    // Returning to the original speed returns the authored timing too.
+    const restored = retimeCensorForSpeed(slowed, 0.5, 1);
+    expect(restored.range).toEqual(region.range);
+    expect(restored.keyframes).toEqual(region.keyframes);
   });
 
   it('holds position with a single keyframe', () => {

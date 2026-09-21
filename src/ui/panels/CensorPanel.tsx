@@ -182,33 +182,8 @@ export function CensorPanel({
             </Field>
           )}
 
-          <Field
-            label="Position"
-            value={`${Math.round(rect.x * 100)}%, ${Math.round(rect.y * 100)}%`}
-          >
-            <div className="nudge-pad">
-              <RepeatButton className="step-btn" label="Nudge left" onPress={() => nudge(-STEP, 0)}>
-                ←
-              </RepeatButton>
-              <div className="nudge-stack">
-                <RepeatButton className="step-btn" label="Nudge up" onPress={() => nudge(0, -STEP)}>
-                  ↑
-                </RepeatButton>
-                <RepeatButton className="step-btn" label="Nudge down" onPress={() => nudge(0, STEP)}>
-                  ↓
-                </RepeatButton>
-              </div>
-              <RepeatButton className="step-btn" label="Nudge right" onPress={() => nudge(STEP, 0)}>
-                →
-              </RepeatButton>
-              <div className="hint nudge-hint">
-                Tap to move the region 1% at a time, or hold to keep moving. Drag it on the preview
-                for big moves.
-              </div>
-            </div>
-          </Field>
-
           <Field label="Size" value={`${Math.round(rect.w * 100)}% × ${Math.round(rect.h * 100)}%`}>
+            <div className="size-axis-label">Horizontal</div>
             <div className="stepper-row">
               <RepeatButton
                 className="step-btn"
@@ -233,6 +208,7 @@ export function CensorPanel({
                 +
               </RepeatButton>
             </div>
+            <div className="size-axis-label">Vertical</div>
             <div className="stepper-row">
               <RepeatButton
                 className="step-btn"
@@ -256,6 +232,32 @@ export function CensorPanel({
               >
                 +
               </RepeatButton>
+            </div>
+          </Field>
+
+          <Field
+            label="Position"
+            value={`${Math.round(rect.x * 100)}%, ${Math.round(rect.y * 100)}%`}
+          >
+            <div className="nudge-pad">
+              <RepeatButton className="step-btn" label="Nudge left" onPress={() => nudge(-STEP, 0)}>
+                ←
+              </RepeatButton>
+              <div className="nudge-stack">
+                <RepeatButton className="step-btn" label="Nudge up" onPress={() => nudge(0, -STEP)}>
+                  ↑
+                </RepeatButton>
+                <RepeatButton className="step-btn" label="Nudge down" onPress={() => nudge(0, STEP)}>
+                  ↓
+                </RepeatButton>
+              </div>
+              <RepeatButton className="step-btn" label="Nudge right" onPress={() => nudge(STEP, 0)}>
+                →
+              </RepeatButton>
+              <div className="hint nudge-hint">
+                Tap to move the region 1% at a time, or hold to keep moving. Drag it on the preview
+                for big moves.
+              </div>
             </div>
           </Field>
 

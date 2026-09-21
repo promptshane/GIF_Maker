@@ -34,6 +34,7 @@ import {
   buildVideoPlan,
   censorRectAt,
   mergeStaticFrames,
+  retimeCensorForSpeed,
   type FramePlan,
 } from '../render/timeline';
 import {
@@ -961,8 +962,22 @@ export const useStore = create<AppState>()((set, get) => {
     setDirection: (direction) =>
       set({ videoSettings: { ...get().videoSettings, direction }, result: null, estimate: null }),
 
-    setSpeed: (speed) =>
-      set({ videoSettings: { ...get().videoSettings, speed }, result: null, estimate: null }),
+    setSpeed: (speed) => {
+      const state = get();
+      const nextSpeed = Math.max(0.01, speed);
+      const oldSpeed = Math.max(0.01, state.videoSettings.speed);
+      set({
+        videoSettings: { ...state.videoSettings, speed: nextSpeed },
+        // Tracking points are authored on the output timeline. Retime them so
+        // they stay attached to the same source-video moments as speed changes.
+        censors:
+          state.kind === 'video'
+            ? state.censors.map((region) => retimeCensorForSpeed(region, oldSpeed, nextSpeed))
+            : state.censors,
+        result: null,
+        estimate: null,
+      });
+    },
 
     setFps: (fps) => {
       savePrefs({ fps });
