@@ -283,3 +283,145 @@
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
+
+
+/* Saved frame projects --------------------------------------------------- */
+.frame-saved-projects {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.frame-saved-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 9px;
+}
+
+.frame-saved-head h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.frame-saved-head span,
+.frame-saved-empty {
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.frame-saved-empty {
+  margin: 0;
+  padding: 12px 0 2px;
+}
+
+.frame-saved-row {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  margin-bottom: 7px;
+}
+
+.frame-saved-open {
+  flex: 1;
+  min-width: 0;
+  padding: 11px 12px;
+  border-radius: 11px;
+  background: var(--bg-raised);
+  border: 1px solid var(--line);
+  text-align: left;
+}
+
+.frame-saved-open:active {
+  background: var(--bg-input);
+}
+
+.frame-saved-open:disabled {
+  opacity: 0.55;
+}
+
+.frame-saved-name,
+.frame-saved-meta {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.frame-saved-name {
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.frame-saved-meta {
+  margin-top: 2px;
+  color: var(--text-faint);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.frame-saved-delete {
+  width: 42px;
+  min-height: 42px;
+  border-radius: 11px;
+  background: var(--bg-input);
+  color: var(--text-faint);
+  font-size: 18px;
+}
+
+.frame-saved-delete:active {
+  color: var(--danger);
+  background: rgba(255, 95, 87, 0.12);
+}
+
+/* Project + per-frame AI actions ---------------------------------------- */
+.frame-save-project {
+  flex: 1 !important;
+}
+
+.frame-ai-action-row {
+  margin-top: 8px;
+}
+
+.frame-selected-ai {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  font-size: 13px;
+}
+
+.frame-bulk-ai {
+  flex: 0 0 auto !important;
+}
+
+.frame-card-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border-top: 1px solid var(--line);
+}
+
+.frame-card-actions .frame-download,
+.frame-card-actions .frame-add-ai {
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+  padding: 5px 3px;
+  color: var(--text-dim);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.frame-card-actions .frame-download {
+  border-top: 0;
+  border-right: 1px solid var(--line);
+}
+
+.frame-card-actions .frame-add-ai {
+  color: var(--text);
+}
+
+.frame-card-actions button:active {
+  background: var(--bg-input);
+}
