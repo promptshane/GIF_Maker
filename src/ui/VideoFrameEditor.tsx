@@ -1,4 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { uid } from '../lib/format';
+import {
+  isEphemeralStorageError,
+  isQuotaError,
+  requestPersistence,
+} from '../state/projectsDb';
+import {
+  deleteVideoFrameProject,
+  getVideoFrameProject,
+  listVideoFrameProjects,
+  putVideoFrameProject,
+  videoFrameProjectsSupported,
+  type SavedVideoFrameProjectMeta,
+  type StoredVideoFrameReplacement,
+} from '../state/videoFrameProjectsDb';
+import { Sheet } from './common';
 import './videoFrames.css';
 
 interface ExtractedFrame {
@@ -10,6 +26,12 @@ interface ExtractedFrame {
 interface ReplacementFrame {
   file: File;
   url: string;
+}
+
+interface PendingRestore {
+  id: string;
+  name: string;
+  replacements: Array<{ index: number; file: File }>;
 }
 
 type ViewMode = 'original' | 'ai';
@@ -27,6 +49,11 @@ function detectFrameNumber(name: string): number | null {
   if (!match) return null;
   const value = Number(match[1]);
   return Number.isInteger(value) && value > 0 ? value - 1 : null;
+}
+
+function defaultProjectName(file: File): string {
+  const stem = file.name.replace(/\.[A-Za-z0-9]{1,5}$/, '').trim();
+  return stem || 'Video project';
 }
 
 function nearestStandardFps(value: number): number {
@@ -116,12 +143,16 @@ function canvasToPng(canvas: HTMLCanvasElement): Promise<Blob> {
 export function VideoFrameEditor() {
   const fileInput = useRef<HTMLInputElement | null>(null);
   const aiInput = useRef<HTMLInputElement | null>(null);
+  const singleAiInput = useRef<HTMLInputElement | null>(null);
+  const singleAiTarget = useRef<number | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const videoUrlRef = useRef<string | null>(null);
   const replacementUrls = useRef(new Set<string>());
+  const pendingRestore = useRef<PendingRestore | null>(null);
   const scanToken = useRef(0);
 
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [videoFile, setVideoFile] = useState<File | null>(null);
   const [frames, setFrames] = useState<ExtractedFrame[]>([]);
   const [fps, setFps] = useState(0);
   const [scanning, setScanning] = useState(false);
@@ -133,6 +164,31 @@ export function VideoFrameEditor() {
   const [savingIndex, setSavingIndex] = useState<number | null>(null);
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
+
+  const [savedProjects, setSavedProjects] = useState<SavedVideoFrameProjectMeta[]>([]);
+  const [projectsLoading, setProjectsLoading] = useState(false);
+  const [openingProjectId, setOpeningProjectId] = useState<string | null>(null);
+  const [projectId, setProjectId] = useState<string | null>(null);
+  const [projectName, setProjectName] = useState<string | null>(null);
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [saveName, setSaveName] = useState('');
+  const [savingProject, setSavingProject] = useState(false);
+
+  async function refreshSavedProjects(): Promise<void> {
+    if (!videoFrameProjectsSupported()) return;
+    setProjectsLoading(true);
+    try {
+      setSavedProjects(await listVideoFrameProjects());
+    } catch {
+      setSavedProjects([]);
+    } finally {
+      setProjectsLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void refreshSavedProjects();
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -179,7 +235,7 @@ export function VideoFrameEditor() {
     setReplacements(new Map());
   };
 
-  const chooseVideo = (file: File) => {
+  const chooseVideo = (file: File, restore: PendingRestore | null = null) => {
     scanToken.current += 1;
     videoRef.current?.pause();
     if (videoUrlRef.current) URL.revokeObjectURL(videoUrlRef.current);
@@ -187,14 +243,18 @@ export function VideoFrameEditor() {
 
     const url = URL.createObjectURL(file);
     videoUrlRef.current = url;
+    pendingRestore.current = restore;
     setVideoUrl(url);
+    setVideoFile(file);
     setFrames([]);
     setFps(0);
     setCurrentFrame(0);
     setViewMode('original');
     setScanning(false);
     setScanProgress(0);
-    setNotice('');
+    setProjectId(restore?.id ?? null);
+    setProjectName(restore?.name ?? null);
+    setNotice(restore ? 'Opening saved project…' : '');
     setError('');
   };
 
@@ -314,9 +374,30 @@ export function VideoFrameEditor() {
       setFrames(unique);
       setFps(detectedFps);
       setScanProgress(1);
-      setNotice(
-        'Detected ' + unique.length + ' frames at ' + formatFps(detectedFps) + ' FPS. Tap any frame to inspect or download it.'
-      );
+
+      const restore = pendingRestore.current;
+      if (restore) {
+        const restored = new Map<number, ReplacementFrame>();
+        for (const item of restore.replacements) {
+          if (item.index < 0 || item.index >= unique.length) continue;
+          const url = URL.createObjectURL(item.file);
+          replacementUrls.current.add(url);
+          restored.set(item.index, { file: item.file, url });
+        }
+        setReplacements(restored);
+        setViewMode(restored.size > 0 ? 'ai' : 'original');
+        setNotice(
+          'Restored ' + restore.name + ' · ' + restored.size + ' AI frame' +
+          (restored.size === 1 ? '' : 's') + '.'
+        );
+        pendingRestore.current = null;
+      } else {
+        setNotice(
+          'Detected ' + unique.length + ' frames at ' + formatFps(detectedFps) +
+          ' FPS. Tap any frame to inspect, download, or add its AI replacement.'
+        );
+      }
+
       video.pause();
       await waitForSeek(video, 0);
       setCurrentFrame(0);
@@ -387,10 +468,40 @@ export function VideoFrameEditor() {
     }
   };
 
+  const assignAiFrame = (index: number, file: File) => {
+    if (index < 0 || index >= frames.length) return;
+    setReplacements((current) => {
+      const next = new Map(current);
+      const previous = next.get(index);
+      if (previous) {
+        URL.revokeObjectURL(previous.url);
+        replacementUrls.current.delete(previous.url);
+      }
+      const url = URL.createObjectURL(file);
+      replacementUrls.current.add(url);
+      next.set(index, { file, url });
+      return next;
+    });
+    setCurrentFrame(index);
+    setViewMode('ai');
+    setError('');
+    setNotice(
+      'AI image assigned to frame ' + String(index + 1).padStart(3, '0') +
+      '. Save the project when you want to keep this change.'
+    );
+  };
+
+  const chooseAiForFrame = (index: number) => {
+    singleAiTarget.current = index;
+    setCurrentFrame(index);
+    singleAiInput.current?.click();
+    void selectFrame(index);
+  };
+
   const importAiFrames = (files: File[]) => {
     if (frames.length === 0 || files.length === 0) return;
 
-    const imageFiles = files.filter((file) => file.type.startsWith('image/') || /.(png|jpe?g|webp|heic|heif)$/i.test(file.name));
+    const imageFiles = files.filter((file) => file.type.startsWith('image/') || /\.(png|jpe?g|webp|heic|heif)$/i.test(file.name));
     const explicit = new Map<number, File>();
     for (const file of imageFiles) {
       const index = detectFrameNumber(file.name);
@@ -405,9 +516,7 @@ export function VideoFrameEditor() {
       sorted.forEach((file, index) => assignments.set(index, file));
     } else {
       setError(
-        'Could not match those images to frames. Keep names like frame_000001.png, or select exactly ' +
-        frames.length +
-        ' images so they can be matched in filename order.'
+        'Could not match those images automatically. You can instead select any frame and tap Add AI for selected frame.'
       );
       return;
     }
@@ -429,9 +538,110 @@ export function VideoFrameEditor() {
     setViewMode('ai');
     setError('');
     setNotice(
-      'Imported ' + assignments.size + ' AI frame' + (assignments.size === 1 ? '' : 's') + '. ' +
-      (assignments.size === frames.length ? 'Every frame is replaced.' : 'Unchanged frames fall back to the original preview.')
+      'Imported ' + assignments.size + ' AI frame' + (assignments.size === 1 ? '' : 's') +
+      '. Save the project when you want to keep these changes.'
     );
+  };
+
+  const openSaveSheet = () => {
+    if (!videoFile) return;
+    setSaveName(projectName ?? defaultProjectName(videoFile));
+    setSaveOpen(true);
+  };
+
+  const saveCurrentProject = async () => {
+    if (!videoFile || frames.length === 0) return;
+    const name = saveName.trim() || defaultProjectName(videoFile);
+    const id = projectId ?? uid();
+    setSavingProject(true);
+    setError('');
+
+    try {
+      const storedReplacements: StoredVideoFrameReplacement[] = [...replacements.entries()]
+        .sort(([a], [b]) => a - b)
+        .map(([index, replacement]) => ({
+          index,
+          name: replacement.file.name,
+          type: replacement.file.type,
+          blob: replacement.file,
+        }));
+
+      const bytes = videoFile.size + storedReplacements.reduce((sum, item) => sum + item.blob.size, 0);
+      const savedAt = Date.now();
+      await putVideoFrameProject(
+        {
+          id,
+          name,
+          savedAt,
+          videoName: videoFile.name,
+          bytes,
+          frameCount: frames.length,
+          replacementCount: storedReplacements.length,
+        },
+        {
+          id,
+          version: 1,
+          video: {
+            name: videoFile.name,
+            type: videoFile.type,
+            blob: videoFile,
+          },
+          replacements: storedReplacements,
+        },
+      );
+      void requestPersistence();
+      setProjectId(id);
+      setProjectName(name);
+      setSaveOpen(false);
+      setNotice('Saved ' + name + ' with ' + storedReplacements.length + ' AI frame' +
+        (storedReplacements.length === 1 ? '' : 's') + '.');
+      await refreshSavedProjects();
+    } catch (cause) {
+      setError(
+        isQuotaError(cause)
+          ? 'There is not enough device storage to save this project.'
+          : isEphemeralStorageError(cause)
+            ? 'Video projects cannot be saved in Private Browsing.'
+            : cause instanceof Error
+              ? cause.message
+              : 'The video project could not be saved.'
+      );
+    } finally {
+      setSavingProject(false);
+    }
+  };
+
+  const openSavedProject = async (meta: SavedVideoFrameProjectMeta) => {
+    setOpeningProjectId(meta.id);
+    setError('');
+    try {
+      const data = await getVideoFrameProject(meta.id);
+      if (!data) throw new Error('That saved project is no longer available.');
+      const file = new File([data.video.blob], data.video.name, { type: data.video.type });
+      const restore: PendingRestore = {
+        id: meta.id,
+        name: meta.name,
+        replacements: data.replacements.map((item) => ({
+          index: item.index,
+          file: new File([item.blob], item.name, { type: item.type }),
+        })),
+      };
+      chooseVideo(file, restore);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'The saved project could not be opened.');
+    } finally {
+      setOpeningProjectId(null);
+    }
+  };
+
+  const removeSavedProject = async (meta: SavedVideoFrameProjectMeta) => {
+    if (!confirm('Delete “' + meta.name + '”? This cannot be undone.')) return;
+    try {
+      await deleteVideoFrameProject(meta.id);
+      await refreshSavedProjects();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'The saved project could not be deleted.');
+    }
   };
 
   const togglePlay = () => {
@@ -454,6 +664,7 @@ export function VideoFrameEditor() {
   }, [viewMode, replacements, currentFrame, frames]);
 
   const missingAiFrames = Math.max(0, frames.length - replacements.size);
+  const currentHasAi = replacements.has(currentFrame);
 
   return (
     <div className="video-frame-editor">
@@ -472,6 +683,43 @@ export function VideoFrameEditor() {
             </span>
           </button>
           <p className="fineprint">The app scans the clip at normal speed to identify every displayed source frame accurately.</p>
+
+          {videoFrameProjectsSupported() && (
+            <section className="frame-saved-projects">
+              <div className="frame-saved-head">
+                <h3>Saved video projects</h3>
+                {projectsLoading && <span>Loading…</span>}
+              </div>
+              {!projectsLoading && savedProjects.length === 0 && (
+                <p className="frame-saved-empty">No saved video projects yet.</p>
+              )}
+              {savedProjects.map((project) => (
+                <div className="frame-saved-row" key={project.id}>
+                  <button
+                    type="button"
+                    className="frame-saved-open"
+                    disabled={openingProjectId !== null}
+                    onClick={() => void openSavedProject(project)}
+                  >
+                    <span className="frame-saved-name">{project.name}</span>
+                    <span className="frame-saved-meta">
+                      {project.frameCount} frames · {project.replacementCount} AI · {new Date(project.savedAt).toLocaleDateString()}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="frame-saved-delete"
+                    aria-label={'Delete ' + project.name}
+                    onClick={() => void removeSavedProject(project)}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </section>
+          )}
+
+          {error && <div className="frame-error">{error}</div>}
         </div>
       ) : (
         <>
@@ -490,7 +738,7 @@ export function VideoFrameEditor() {
               )}
               {scanning && (
                 <div className="frame-scan-overlay">
-                  <strong>Reading frames…</strong>
+                  <strong>{pendingRestore.current ? 'Reopening project…' : 'Reading frames…'}</strong>
                   <span>{Math.round(scanProgress * 100)}%</span>
                 </div>
               )}
@@ -529,6 +777,7 @@ export function VideoFrameEditor() {
                   <span><strong>{formatFps(fps)}</strong> FPS</span>
                   <span><strong>{frames.length}</strong> frames</span>
                   <span><strong>{videoRef.current ? videoRef.current.videoWidth + '×' + videoRef.current.videoHeight : '—'}</strong></span>
+                  {projectName && <span><strong>{projectName}</strong></span>}
                 </div>
               </>
             )}
@@ -539,12 +788,23 @@ export function VideoFrameEditor() {
               <button type="button" className="ghost-btn" onClick={() => fileInput.current?.click()}>
                 Change video
               </button>
-              {frames.length > 0 && (
-                <button type="button" className="cta frame-import-ai" onClick={() => aiInput.current?.click()}>
-                  Import AI frames
+              {frames.length > 0 && videoFrameProjectsSupported() && (
+                <button type="button" className="ghost-btn frame-save-project" onClick={openSaveSheet}>
+                  {projectId ? 'Save changes' : 'Save project'}
                 </button>
               )}
             </div>
+
+            {frames.length > 0 && (
+              <div className="frame-action-row frame-ai-action-row">
+                <button type="button" className="cta frame-selected-ai" onClick={() => chooseAiForFrame(currentFrame)}>
+                  {currentHasAi ? 'Replace AI' : 'Add AI'} for frame #{String(currentFrame + 1).padStart(3, '0')}
+                </button>
+                <button type="button" className="ghost-btn frame-bulk-ai" onClick={() => aiInput.current?.click()}>
+                  Bulk import
+                </button>
+              </div>
+            )}
 
             {viewMode === 'ai' && replacements.size > 0 && (
               <div className="hint">
@@ -562,7 +822,7 @@ export function VideoFrameEditor() {
               <div className="frame-browser-head">
                 <div>
                   <h2>Frames</h2>
-                  <p>Each download is a full-resolution PNG named for automatic re-import.</p>
+                  <p>Tap a frame to select it. Download the original or attach its AI replacement directly.</p>
                 </div>
                 <strong>{frames.length}</strong>
               </div>
@@ -583,14 +843,23 @@ export function VideoFrameEditor() {
                       <span className="frame-number">{String(index + 1).padStart(3, '0')}</span>
                       {replacements.has(index) && <span className="frame-ai-badge">AI</span>}
                     </button>
-                    <button
-                      type="button"
-                      className="frame-download"
-                      disabled={savingIndex !== null}
-                      onClick={() => void downloadFrame(index)}
-                    >
-                      {savingIndex === index ? 'Saving…' : 'Download'}
-                    </button>
+                    <div className="frame-card-actions">
+                      <button
+                        type="button"
+                        className="frame-download"
+                        disabled={savingIndex !== null}
+                        onClick={() => void downloadFrame(index)}
+                      >
+                        {savingIndex === index ? 'Saving…' : 'Download'}
+                      </button>
+                      <button
+                        type="button"
+                        className="frame-add-ai"
+                        onClick={() => chooseAiForFrame(index)}
+                      >
+                        {replacements.has(index) ? 'Replace AI' : 'Add AI'}
+                      </button>
+                    </div>
                   </article>
                 ))}
               </div>
@@ -622,6 +891,49 @@ export function VideoFrameEditor() {
           if (files.length) importAiFrames(files);
         }}
       />
+      <input
+        ref={singleAiInput}
+        type="file"
+        accept="image/*,.png,.jpg,.jpeg,.webp,.heic,.heif"
+        hidden
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          event.target.value = '';
+          const target = singleAiTarget.current;
+          singleAiTarget.current = null;
+          if (file && target !== null) assignAiFrame(target, file);
+        }}
+      />
+
+      <Sheet open={saveOpen} onClose={() => setSaveOpen(false)} labelledBy="video-frame-save-title">
+        <h2 id="video-frame-save-title">{projectId ? 'Save changes' : 'Save video project'}</h2>
+        <p className="sheet-sub">
+          Keeps the original clip and your AI replacement images on this device so you can continue later.
+        </p>
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            void saveCurrentProject();
+          }}
+        >
+          <input
+            type="text"
+            value={saveName}
+            aria-label="Project name"
+            placeholder="Project name"
+            autoComplete="off"
+            enterKeyHint="done"
+            onChange={(event) => setSaveName(event.target.value)}
+            onFocus={(event) => event.target.select()}
+          />
+          <button type="submit" className="cta" style={{ marginTop: 14 }} disabled={savingProject}>
+            {savingProject ? 'Saving…' : projectId ? 'Save changes' : 'Save'}
+          </button>
+        </form>
+        <div className="hint">
+          Extracted thumbnails are rebuilt from the original clip when you reopen the project, so they do not waste storage.
+        </div>
+      </Sheet>
     </div>
   );
 }
