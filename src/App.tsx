@@ -8,6 +8,7 @@ import { PhotoEditScreen } from './ui/PhotoEditScreen';
 import { ExportSheet } from './ui/ExportSheet';
 import { PhotoExportSheet } from './ui/PhotoExportSheet';
 import { SaveProjectSheet } from './ui/SaveProjectSheet';
+import { VideoFrameEditor } from './ui/VideoFrameEditor';
 import { BusyVeil, ErrorBanner } from './ui/common';
 
 export default function App() {
@@ -26,6 +27,7 @@ export default function App() {
   const [exportOpen, setExportOpen] = useState(false);
   const [saveOpen, setSaveOpen] = useState(false);
   const [photoExportOpen, setPhotoExportOpen] = useState(false);
+  const [videoFramesOpen, setVideoFramesOpen] = useState(false);
 
   const editing = appMode !== null && step !== 'import';
   // Saved and unchanged reads as a quiet "Saved"; anything else invites a tap.
@@ -34,7 +36,7 @@ export default function App() {
   return (
     <div className={`app${immersive ? ' immersive' : ''}`}>
       {/* Hidden in immersive mode so the preview owns the whole screen. */}
-      {!immersive && appMode !== null && (
+      {!videoFramesOpen && !immersive && appMode !== null && (
         <header className="topbar">
           {step === 'import' ? (
             <button type="button" className="icon-only" aria-label="Back to editor choices" onClick={goHome}>‹</button>
@@ -89,12 +91,14 @@ export default function App() {
         </header>
       )}
 
-      {error && (
+      {!videoFramesOpen && error && (
         <ErrorBanner message={error.message} hint={error.hint} onDismiss={() => setError(null)} />
       )}
 
-      {appMode === null ? (
-        <ModeSelectScreen />
+      {videoFramesOpen ? (
+        <VideoFrameEditor onClose={() => setVideoFramesOpen(false)} />
+      ) : appMode === null ? (
+        <ModeSelectScreen onEditVideo={() => setVideoFramesOpen(true)} />
       ) : step === 'import' ? (
         <ImportScreen mode={appMode} />
       ) : appMode === 'photo' ? (
@@ -108,7 +112,7 @@ export default function App() {
         <PhotoExportSheet open={photoExportOpen} onClose={() => setPhotoExportOpen(false)} />
       )}
       <SaveProjectSheet open={saveOpen} onClose={() => setSaveOpen(false)} />
-      {busy && <BusyVeil label={busy.label} progress={busy.progress} />}
+      {!videoFramesOpen && busy && <BusyVeil label={busy.label} progress={busy.progress} />}
     </div>
   );
 }

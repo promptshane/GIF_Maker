@@ -2,7 +2,7 @@ import { useRef } from 'react';
 import { useStore } from '../state/store';
 
 /** The app's front door: choose a workflow before picking media. */
-export function ModeSelectScreen() {
+export function ModeSelectScreen({ onEditVideo }: { onEditVideo: () => void }) {
   const gifPhotos = useRef<HTMLInputElement | null>(null);
   const gifVideo = useRef<HTMLInputElement | null>(null);
   const setAppMode = useStore((state) => state.setAppMode);
@@ -13,7 +13,7 @@ export function ModeSelectScreen() {
     <div className="import mode-select">
       <div className="import-hero">
         <div className="hero-mark" aria-hidden="true">✦</div>
-        <h2>GIF Maker + Photo Editor</h2>
+        <h2>GIF Maker + Editors</h2>
         <p>Choose what you want to make. Your media stays on this device.</p>
       </div>
 
@@ -22,6 +22,15 @@ export function ModeSelectScreen() {
         <span className="grow">
           <span className="mode-card-title">Edit Photo</span>
           <span className="mode-card-sub">Censor, resize and control export quality.</span>
+        </span>
+        <span className="mode-arrow" aria-hidden="true">›</span>
+      </button>
+
+      <button type="button" className="mode-card video" onClick={onEditVideo}>
+        <span className="mode-card-icon" aria-hidden="true">▦</span>
+        <span className="grow">
+          <span className="mode-card-title">Edit Video</span>
+          <span className="mode-card-sub">Extract every frame, edit them with AI, then compare playback.</span>
         </span>
         <span className="mode-arrow" aria-hidden="true">›</span>
       </button>
