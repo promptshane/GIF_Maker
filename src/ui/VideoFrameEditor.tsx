@@ -393,7 +393,7 @@ export function VideoFrameEditor({ onClose }: { onClose: () => void }) {
       }
 
       const built = thumbs.map((thumb, index) => {
-        if (!thumb) throw new Error( Frame ${index + 1} could not be captured.`);
+        if (!thumb) throw new Error(`Frame ${index + 1} could not be captured.`);
         return {
           index,
           time: times[index],

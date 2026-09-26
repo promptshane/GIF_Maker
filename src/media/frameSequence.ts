@@ -56,7 +56,7 @@ export function frameFilename(index: number): string {
  * names are preferred, but a trailing number before the extension is accepted
  * so AI tools can add prefixes without breaking the round trip.
  */
-export function frameIndexFromFilename(name: string, frameCount: number | null {
+export function frameIndexFromFilename(name: string, frameCount: number): number | null {
   const exact = name.match(/frame[\s_-]*0*(\d{1,7})/i);
   const fallback = name.match(/(\d{1,7})(?=\.[^.]+$)/);
   const value = Number((exact ?? fallback)?.[1]);
