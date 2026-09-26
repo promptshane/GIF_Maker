@@ -122,7 +122,6 @@ export function VideoFrameEditor() {
   const scanToken = useRef(0);
 
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
-  const [videoName, setVideoName] = useState('');
   const [frames, setFrames] = useState<ExtractedFrame[]>([]);
   const [fps, setFps] = useState(0);
   const [scanning, setScanning] = useState(false);
@@ -189,7 +188,6 @@ export function VideoFrameEditor() {
     const url = URL.createObjectURL(file);
     videoUrlRef.current = url;
     setVideoUrl(url);
-    setVideoName(file.name);
     setFrames([]);
     setFps(0);
     setCurrentFrame(0);
