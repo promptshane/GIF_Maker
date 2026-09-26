@@ -5,6 +5,7 @@ import { ImportScreen } from './ui/ImportScreen';
 import { ModeSelectScreen } from './ui/ModeSelectScreen';
 import { EditScreen } from './ui/EditScreen';
 import { PhotoEditScreen } from './ui/PhotoEditScreen';
+import { VideoFrameEditor } from './ui/VideoFrameEditor';
 import { ExportSheet } from './ui/ExportSheet';
 import { PhotoExportSheet } from './ui/PhotoExportSheet';
 import { SaveProjectSheet } from './ui/SaveProjectSheet';
@@ -26,15 +27,31 @@ export default function App() {
   const [exportOpen, setExportOpen] = useState(false);
   const [saveOpen, setSaveOpen] = useState(false);
   const [photoExportOpen, setPhotoExportOpen] = useState(false);
+  const [videoFramesOpen, setVideoFramesOpen] = useState(false);
 
   const editing = appMode !== null && step !== 'import';
   // Saved and unchanged reads as a quiet "Saved"; anything else invites a tap.
   const saveLabel = projectId && !dirty ? 'Saved' : 'Save';
 
   return (
-    <div className={`app${immersive ? ' immersive' : ''}`}>
+    <div className={'app' + (immersive ? ' immersive' : '')}>
+      {!immersive && videoFramesOpen && (
+        <header className="topbar">
+          <button
+            type="button"
+            className="icon-only"
+            aria-label="Back to editor choices"
+            onClick={() => setVideoFramesOpen(false)}
+          >
+            ‹
+          </button>
+          <h1>Video Frames</h1>
+          <span className="topbar-spacer" aria-hidden="true" />
+        </header>
+      )}
+
       {/* Hidden in immersive mode so the preview owns the whole screen. */}
-      {!immersive && appMode !== null && (
+      {!immersive && !videoFramesOpen && appMode !== null && (
         <header className="topbar">
           {step === 'import' ? (
             <button type="button" className="icon-only" aria-label="Back to editor choices" onClick={goHome}>‹</button>
@@ -47,7 +64,7 @@ export default function App() {
               {projectsSupported && (
                 <button
                   type="button"
-                  className={`topbar-save${projectId && !dirty ? ' saved' : ''}${dirty ? ' dirty' : ''}`}
+                  className={'topbar-save' + (projectId && !dirty ? ' saved' : '') + (dirty ? ' dirty' : '')}
                   onClick={() => setSaveOpen(true)}
                   disabled={plan.frames.length === 0}
                   aria-label={dirty ? 'Save project (unsaved changes)' : 'Save project'}
@@ -89,12 +106,14 @@ export default function App() {
         </header>
       )}
 
-      {error && (
+      {!videoFramesOpen && error && (
         <ErrorBanner message={error.message} hint={error.hint} onDismiss={() => setError(null)} />
       )}
 
-      {appMode === null ? (
-        <ModeSelectScreen />
+      {videoFramesOpen ? (
+        <VideoFrameEditor />
+      ) : appMode === null ? (
+        <ModeSelectScreen onVideoFrames={() => setVideoFramesOpen(true)} />
       ) : step === 'import' ? (
         <ImportScreen mode={appMode} />
       ) : appMode === 'photo' ? (
@@ -103,12 +122,12 @@ export default function App() {
         <EditScreen />
       )}
 
-      {appMode === 'gif' && <ExportSheet open={exportOpen} onClose={() => setExportOpen(false)} />}
-      {appMode === 'photo' && (
+      {!videoFramesOpen && appMode === 'gif' && <ExportSheet open={exportOpen} onClose={() => setExportOpen(false)} />}
+      {!videoFramesOpen && appMode === 'photo' && (
         <PhotoExportSheet open={photoExportOpen} onClose={() => setPhotoExportOpen(false)} />
       )}
-      <SaveProjectSheet open={saveOpen} onClose={() => setSaveOpen(false)} />
-      {busy && <BusyVeil label={busy.label} progress={busy.progress} />}
+      {!videoFramesOpen && <SaveProjectSheet open={saveOpen} onClose={() => setSaveOpen(false)} />}
+      {!videoFramesOpen && busy && <BusyVeil label={busy.label} progress={busy.progress} />}
     </div>
   );
 }

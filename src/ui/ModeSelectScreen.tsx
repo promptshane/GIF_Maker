@@ -1,8 +1,12 @@
 import { useRef } from 'react';
 import { useStore } from '../state/store';
 
+interface ModeSelectScreenProps {
+  onVideoFrames?: () => void;
+}
+
 /** The app's front door: choose a workflow before picking media. */
-export function ModeSelectScreen() {
+export function ModeSelectScreen({ onVideoFrames }: ModeSelectScreenProps) {
   const gifPhotos = useRef<HTMLInputElement | null>(null);
   const gifVideo = useRef<HTMLInputElement | null>(null);
   const setAppMode = useStore((state) => state.setAppMode);
@@ -34,6 +38,17 @@ export function ModeSelectScreen() {
         </span>
         <span className="mode-arrow" aria-hidden="true">›</span>
       </button>
+
+      {onVideoFrames && (
+        <button type="button" className="mode-card video-frames-card" onClick={onVideoFrames}>
+          <span className="mode-card-icon" aria-hidden="true">▦</span>
+          <span className="grow">
+            <span className="mode-card-title">Edit Video</span>
+            <span className="mode-card-sub">Extract every frame, edit externally, then preview replacements.</span>
+          </span>
+          <span className="mode-arrow" aria-hidden="true">›</span>
+        </button>
+      )}
 
       <p className="fineprint">Private by design — nothing is uploaded.</p>
 
