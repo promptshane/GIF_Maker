@@ -831,7 +831,7 @@ export function VideoFrameEditor() {
                 {frames.map((frame, index) => (
                   <article
                     key={frame.index}
-                    className={'frame-card' + (index === currentFrame ? ' selected' : '')}
+                    className={'frame-card' + (index === currentFrame ? ' selected' : '') + (replacements.has(index) ? ' has-ai' : '')}
                   >
                     <button
                       type="button"
