@@ -151,6 +151,15 @@
   padding-inline: 14px;
 }
 
+.frame-export-row {
+  margin-top: 8px;
+}
+
+.frame-export-video {
+  flex: 1;
+  min-width: 0;
+}
+
 .frame-import-ai {
   flex: 1;
   min-width: 0;
