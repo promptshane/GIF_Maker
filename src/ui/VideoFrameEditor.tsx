@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { uid } from '../lib/format';
+import { renderAiVideo } from '../media/videoExport';
 import {
   isEphemeralStorageError,
   isQuotaError,
@@ -162,6 +163,8 @@ export function VideoFrameEditor() {
   const [currentFrame, setCurrentFrame] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [savingIndex, setSavingIndex] = useState<number | null>(null);
+  const [exportingVideo, setExportingVideo] = useState(false);
+  const [exportProgress, setExportProgress] = useState(0);
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
 
@@ -644,6 +647,54 @@ export function VideoFrameEditor() {
     }
   };
 
+  const exportAiVersion = async () => {
+    if (
+      !videoUrl ||
+      !videoFile ||
+      frames.length === 0 ||
+      replacements.size === 0 ||
+      exportingVideo
+    ) return;
+
+    setExportingVideo(true);
+    setExportProgress(0);
+    setNotice('');
+    setError('');
+
+    try {
+      const result = await renderAiVideo({
+        sourceUrl: videoUrl,
+        frames,
+        replacementUrls: new Map(
+          [...replacements.entries()].map(([index, replacement]) => [index, replacement.url]),
+        ),
+        fps,
+        onProgress: setExportProgress,
+      });
+
+      const rawStem = projectName ?? defaultProjectName(videoFile);
+      const stem = rawStem.replace(/[\\/:*?"<>|]+/g, '-').trim() || 'video';
+      const filename = stem + '_AI.' + result.extension;
+      const url = URL.createObjectURL(result.blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
+
+      setNotice(
+        'Exported ' + filename + '. AI replacements were used where available; remaining frames use the original video.'
+      );
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'The AI video could not be exported.');
+    } finally {
+      setExportingVideo(false);
+      setExportProgress(0);
+    }
+  };
+
   const togglePlay = () => {
     const video = videoRef.current;
     if (!video || frames.length === 0 || scanning) return;
@@ -785,11 +836,21 @@ export function VideoFrameEditor() {
 
           <section className="frame-actions-panel">
             <div className="frame-action-row">
-              <button type="button" className="ghost-btn" onClick={() => fileInput.current?.click()}>
+              <button
+                type="button"
+                className="ghost-btn"
+                disabled={exportingVideo}
+                onClick={() => fileInput.current?.click()}
+              >
                 Change video
               </button>
               {frames.length > 0 && videoFrameProjectsSupported() && (
-                <button type="button" className="ghost-btn frame-save-project" onClick={openSaveSheet}>
+                <button
+                  type="button"
+                  className="ghost-btn frame-save-project"
+                  disabled={exportingVideo}
+                  onClick={openSaveSheet}
+                >
                   {projectId ? 'Save changes' : 'Save project'}
                 </button>
               )}
@@ -797,11 +858,36 @@ export function VideoFrameEditor() {
 
             {frames.length > 0 && (
               <div className="frame-action-row frame-ai-action-row">
-                <button type="button" className="cta frame-selected-ai" onClick={() => chooseAiForFrame(currentFrame)}>
+                <button
+                  type="button"
+                  className="cta frame-selected-ai"
+                  disabled={exportingVideo}
+                  onClick={() => chooseAiForFrame(currentFrame)}
+                >
                   {currentHasAi ? 'Replace AI' : 'Add AI'} for frame #{String(currentFrame + 1).padStart(3, '0')}
                 </button>
-                <button type="button" className="ghost-btn frame-bulk-ai" onClick={() => aiInput.current?.click()}>
+                <button
+                  type="button"
+                  className="ghost-btn frame-bulk-ai"
+                  disabled={exportingVideo}
+                  onClick={() => aiInput.current?.click()}
+                >
                   Bulk import
+                </button>
+              </div>
+            )}
+
+            {replacements.size > 0 && (
+              <div className="frame-action-row frame-export-row">
+                <button
+                  type="button"
+                  className="cta frame-export-video"
+                  disabled={exportingVideo}
+                  onClick={() => void exportAiVersion()}
+                >
+                  {exportingVideo
+                    ? 'Exporting… ' + Math.round(exportProgress * 100) + '%'
+                    : 'Export AI video'}
                 </button>
               </div>
             )}
@@ -855,6 +941,7 @@ export function VideoFrameEditor() {
                       <button
                         type="button"
                         className="frame-add-ai"
+                        disabled={exportingVideo}
                         onClick={() => chooseAiForFrame(index)}
                       >
                         {replacements.has(index) ? 'Replace AI' : 'Add AI'}
