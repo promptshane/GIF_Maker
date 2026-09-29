@@ -128,13 +128,41 @@ export async function renderAiVideo(options: RenderAiVideoOptions): Promise<Rend
   document.body.appendChild(source);
 
   let audioContext: AudioContext | null = null;
+  let audioDestination: MediaStreamAudioDestinationNode | null = null;
   let stream: MediaStream | null = null;
   let recorder: MediaRecorder | null = null;
   let callbackId = 0;
 
   try {
+    // Start the media element while the export button's user gesture is still
+    // active. Safari remembers that authorization for the later real-time
+    // export pass. Route audio away from the speakers when Web Audio works.
+    let primingPlay: Promise<void> | null = null;
+    try {
+      audioContext = new AudioContext();
+      const sourceNode = audioContext.createMediaElementSource(source);
+      audioDestination = audioContext.createMediaStreamDestination();
+      sourceNode.connect(audioDestination);
+      void audioContext.resume();
+    } catch {
+      if (audioContext) {
+        void audioContext.close().catch(() => undefined);
+        audioContext = null;
+      }
+      audioDestination = null;
+    }
+
     source.load();
+    try {
+      primingPlay = source.play();
+    } catch {
+      primingPlay = null;
+    }
+
     await waitForVideoReady(source);
+    await primingPlay?.catch(() => undefined);
+    source.pause();
+
     if (typeof source.requestVideoFrameCallback !== 'function') {
       throw new Error('This browser cannot synchronize the edited frames for export.');
     }
@@ -198,21 +226,8 @@ export async function renderAiVideo(options: RenderAiVideoOptions): Promise<Rend
     const frameRate = Math.max(1, Math.min(60, options.fps || 30));
     stream = canvas.captureStream(frameRate);
 
-    // Route the original video's audio into the recording without playing it
-    // through the device speakers. If Web Audio is unavailable, the export
-    // still succeeds as a silent video.
-    try {
-      audioContext = new AudioContext();
-      const sourceNode = audioContext.createMediaElementSource(source);
-      const audioDestination = audioContext.createMediaStreamDestination();
-      sourceNode.connect(audioDestination);
+    if (audioDestination) {
       for (const track of audioDestination.stream.getAudioTracks()) stream.addTrack(track);
-      await audioContext.resume();
-    } catch {
-      if (audioContext) {
-        await audioContext.close().catch(() => undefined);
-        audioContext = null;
-      }
     }
 
     const mimeType = chooseMimeType();
@@ -252,7 +267,14 @@ export async function renderAiVideo(options: RenderAiVideoOptions): Promise<Rend
     callbackId = source.requestVideoFrameCallback(onVideoFrame);
 
     recorder.start(250);
-    await source.play();
+    try {
+      await source.play();
+    } catch {
+      // A browser can still revoke audible playback permission after the
+      // priming pass. Muted playback keeps video export working in that case.
+      source.muted = true;
+      await source.play();
+    }
     await ended;
 
     drawFrame(frames.length - 1);
