@@ -4,7 +4,7 @@ import { TimeRangeField } from './TimeRangeField';
 import { censorRectAt } from '../../render/timeline';
 import { clamp } from '../../render/geometry';
 import { formatDuration } from '../../lib/format';
-import type { CensorEffect, CensorShape } from '../../state/types';
+import type { BlurType, CensorEffect, CensorShape } from '../../state/types';
 
 const EFFECTS: Array<{ value: CensorEffect; label: string }> = [
   { value: 'blur', label: 'Blur' },
@@ -184,6 +184,70 @@ export function CensorPanel({
                 }
               />
             </Field>
+          )}
+
+          {selected.effect === 'blur' && (
+            <>
+              <Field label="Blur type">
+                <select
+                  className="blur-type-select"
+                  aria-label="Blur type"
+                  value={selected.blurType ?? 'gaussian'}
+                  onChange={(event) =>
+                    updateCensor(selected.id, { blurType: event.target.value as BlurType })
+                  }
+                >
+                  <option value="gaussian">Gaussian</option>
+                  <option value="box">Box</option>
+                  <option value="motion">Motion</option>
+                  <option value="radial">Radial</option>
+                  <option value="frosted">Frosted</option>
+                </select>
+              </Field>
+
+              {selected.blurType === 'motion' && (
+                <Field label="Motion angle" value={`${Math.round(selected.motionAngle ?? 0)}°`}>
+                  <input
+                    type="range"
+                    min={0}
+                    max={360}
+                    value={selected.motionAngle ?? 0}
+                    aria-label="Motion angle"
+                    onChange={(event) =>
+                      updateCensor(selected.id, { motionAngle: Number(event.target.value) })
+                    }
+                  />
+                </Field>
+              )}
+
+              {selected.blurType === 'frosted' && (
+                <Field label="Grain" value={`${Math.round((selected.grain ?? 0.5) * 100)}%`}>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={Math.round((selected.grain ?? 0.5) * 100)}
+                    aria-label="Frosted grain"
+                    onChange={(event) =>
+                      updateCensor(selected.id, { grain: Number(event.target.value) / 100 })
+                    }
+                  />
+                </Field>
+              )}
+
+              <Field label="Edge feathering" value={`${Math.round((selected.feather ?? 0) * 100)}%`}>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={Math.round((selected.feather ?? 0) * 100)}
+                  aria-label="Edge feathering"
+                  onChange={(event) =>
+                    updateCensor(selected.id, { feather: Number(event.target.value) / 100 })
+                  }
+                />
+              </Field>
+            </>
           )}
 
           <Field label="Size" value={`${formatSizePercent(rect.w)} × ${formatSizePercent(rect.h)}`}>

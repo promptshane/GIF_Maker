@@ -1,4 +1,4 @@
-import type { CensorRegion, CropRect, FitMode, Sticker } from '../state/types';
+import type { BlurType, CensorRegion, CropRect, FitMode, Sticker } from '../state/types';
 import { censorRectAt, isActiveAt } from './timeline';
 import { clamp, computePlacement } from './geometry';
 
@@ -6,6 +6,8 @@ export type Ctx2D = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D
 
 export const EMOJI_FONT_STACK =
   '"Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Twemoji Mozilla", sans-serif';
+
+type RenderedPatch = { canvas: HTMLCanvasElement | OffscreenCanvas; sx: number; sy: number };
 
 interface Scratch {
   canvas: HTMLCanvasElement | OffscreenCanvas;
@@ -44,6 +46,13 @@ export function blurRadius(strength: number, canvasShortSide: number): number {
 export function pixelBlockSize(strength: number, canvasShortSide: number): number {
   const s = clamp(strength, 0, 1);
   return Math.max(1, canvasShortSide * (0.01 + 0.09 * s * s));
+}
+
+/** Smooth alpha transition from a blur region's border to its full-strength interior. */
+export function featherOpacity(distance: number, featherPx: number): number {
+  if (featherPx <= 0) return distance >= 0 ? 1 : 0;
+  const t = clamp(distance / featherPx, 0, 1);
+  return t * t * (3 - 2 * t);
 }
 
 export interface CensorPixelGeometry {
@@ -263,8 +272,16 @@ export class Compositor {
               blurRadius(region.strength, base),
               width,
               height,
+              region.blurType ?? 'gaussian',
+              region.motionAngle ?? 0,
+              region.grain ?? 0.5,
             );
       if (!processed) continue;
+      // Mask the processed patch, not the source frame, so the soft edge
+      // smoothly reveals the untouched image underneath.
+      const rendered = region.effect === 'blur' && (region.feather ?? 0) > 0
+        ? this.featherRegion(processed, g, region)
+        : processed;
 
       ctx.save();
       ctx.beginPath();
@@ -285,9 +302,9 @@ export class Compositor {
       ctx.clip();
       ctx.imageSmoothingEnabled = region.effect !== 'pixelate';
       ctx.drawImage(
-        processed.canvas,
-        processed.sx,
-        processed.sy,
+        rendered.canvas,
+        rendered.sx,
+        rendered.sy,
         g.sampleW,
         g.sampleH,
         g.sampleX,
@@ -388,6 +405,98 @@ export class Compositor {
     return { canvas: out.canvas, sx: 0, sy: 0 };
   }
 
+  /**
+   * Applies a feather mask on a separate scratch surface. The original image
+   * remains on the output canvas and shows through the progressively
+   * transparent edge. Coordinates stay anchored to the output canvas.
+   */
+  private featherRegion(input: RenderedPatch, g: CensorPixelGeometry, region: CensorRegion): RenderedPatch {
+    const width = g.sampleW;
+    const height = g.sampleH;
+    const mask = this.surface('p', width, height);
+    mask.ctx.drawImage(input.canvas, input.sx, input.sy, width, height, 0, 0, width, height);
+    const pixels = mask.ctx.getImageData(0, 0, width, height);
+    const data = pixels.data;
+    const featherPx = Math.min(g.w, g.h) * 0.45 * clamp(region.feather ?? 0, 0, 1);
+    const rx = Math.max(0.5, g.w / 2);
+    const ry = Math.max(0.5, g.h / 2);
+    for (let y = 0; y < height; y++) {
+      const py = g.sampleY + y + 0.5;
+      for (let x = 0; x < width; x++) {
+        const px = g.sampleX + x + 0.5;
+        let distance: number;
+        if (region.shape === 'circle') {
+          const nx = (px - (g.x + rx)) / rx;
+          const ny = (py - (g.y + ry)) / ry;
+          distance = (1 - Math.hypot(nx, ny)) * Math.min(rx, ry);
+        } else {
+          distance = Math.min(px - g.x, g.x + g.w - px, py - g.y, g.y + g.h - py);
+        }
+        data[(y * width + x) * 4 + 3] *= featherOpacity(distance, featherPx);
+      }
+    }
+    mask.ctx.putImageData(pixels, 0, 0);
+    return { canvas: mask.canvas, sx: 0, sy: 0 };
+  }
+
+  /** True separable box blur (a single, uniformly weighted kernel). */
+  private boxBlur(work: Scratch, width: number, height: number, radius: number): void {
+    const pixels = work.ctx.getImageData(0, 0, width, height);
+    const source = pixels.data;
+    const intermediate = new Uint8ClampedArray(source.length);
+    const r = Math.max(1, Math.round(radius));
+    const kernel = 2 * r + 1;
+    const within = (value: number, max: number) => Math.max(0, Math.min(max, value));
+
+    for (let y = 0; y < height; y++) {
+      for (let c = 0; c < 4; c++) {
+        let sum = 0;
+        for (let k = -r; k <= r; k++) {
+          sum += source[(y * width + within(k, width - 1)) * 4 + c];
+        }
+        for (let x = 0; x < width; x++) {
+          intermediate[(y * width + x) * 4 + c] = sum / kernel;
+          sum += source[(y * width + within(x + r + 1, width - 1)) * 4 + c]
+            - source[(y * width + within(x - r, width - 1)) * 4 + c];
+        }
+      }
+    }
+    for (let x = 0; x < width; x++) {
+      for (let c = 0; c < 4; c++) {
+        let sum = 0;
+        for (let k = -r; k <= r; k++) {
+          sum += intermediate[(within(k, height - 1) * width + x) * 4 + c];
+        }
+        for (let y = 0; y < height; y++) {
+          source[(y * width + x) * 4 + c] = sum / kernel;
+          sum += intermediate[(within(y + r + 1, height - 1) * width + x) * 4 + c]
+            - intermediate[(within(y - r, height - 1) * width + x) * 4 + c];
+        }
+      }
+    }
+    work.ctx.putImageData(pixels, 0, 0);
+  }
+
+  /** Stable spatial grain: identical pixels at the same position never flicker between frames. */
+  private addFrostGrain(work: Scratch, width: number, height: number, px: number, py: number, grain: number): void {
+    const amount = clamp(grain, 0, 1);
+    if (amount === 0) return;
+    const image = work.ctx.getImageData(0, 0, width, height);
+    const data = image.data;
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        let seed = Math.imul(px + x + 1, 374761393) ^ Math.imul(py + y + 1, 668265263);
+        seed = Math.imul(seed ^ (seed >>> 13), 1274126177);
+        const noise = ((seed >>> 0) / 4294967295 - 0.5) * 88 * amount;
+        const at = (y * width + x) * 4;
+        for (let c = 0; c < 3; c++) {
+          data[at + c] = Math.max(0, Math.min(255, data[at + c] + noise + 10 * amount));
+        }
+      }
+    }
+    work.ctx.putImageData(image, 0, 0);
+  }
+
   private blurRegion(
     ctx: Ctx2D,
     x: number,
@@ -397,10 +506,13 @@ export class Compositor {
     radius: number,
     canvasW: number,
     canvasH: number,
-  ): { canvas: HTMLCanvasElement | OffscreenCanvas; sx: number; sy: number } | null {
-    // Sample a padded area so the blur pulls in real neighbouring pixels rather
-    // than transparent black, which would darken the edges of the region.
-    const pad = Math.min(radius * 2, 256);
+    style: BlurType,
+    angle: number,
+    grain: number,
+  ): RenderedPatch | null {
+    // Neighbouring source pixels must be sampled beyond the censor boundary,
+    // otherwise blurred edges go dark or shifted streaks turn transparent.
+    const pad = Math.min(radius * 2.5, 256);
     const px = clamp(x - pad, 0, canvasW);
     const py = clamp(y - pad, 0, canvasH);
     const pw = Math.floor(clamp(x + w + pad, 0, canvasW) - px);
@@ -408,26 +520,56 @@ export class Compositor {
     if (pw < 1 || ph < 1) return null;
     const offsetX = x - px;
     const offsetY = y - py;
-
     const work = this.surface('a', pw, ph);
-    work.ctx.save();
-    work.ctx.setTransform(1, 0, 0, 1, 0, 0);
 
-    if (supportsCanvasFilter()) {
-      work.ctx.filter = `blur(${radius}px)`;
-      work.ctx.drawImage(ctx.canvas as CanvasImageSource, px, py, pw, ph, 0, 0, pw, ph);
-      work.ctx.filter = 'none';
+    if (style === 'motion' || style === 'radial') {
+      const source = this.surface('b', pw, ph);
+      source.ctx.drawImage(ctx.canvas as CanvasImageSource, px, py, pw, ph, 0, 0, pw, ph);
+      const count = 13;
+      const radians = clamp(angle, 0, 360) * Math.PI / 180;
+      const centerX = offsetX + w / 2;
+      const centerY = offsetY + h / 2;
+      work.ctx.save();
+      for (let i = 0; i < count; i++) {
+        const t = i / (count - 1);
+        work.ctx.globalAlpha = 1 / (i + 1);
+        if (style === 'motion') {
+          const shift = (t - 0.5) * radius * 2.3;
+          work.ctx.drawImage(source.canvas, 0, 0, pw, ph,
+            shift * Math.cos(radians), shift * Math.sin(radians), pw, ph);
+        } else {
+          const scale = 1 + t * Math.min(0.85, radius / Math.max(20, Math.min(w, h)));
+          work.ctx.drawImage(source.canvas, 0, 0, pw, ph,
+            centerX * (1 - scale), centerY * (1 - scale), pw * scale, ph * scale);
+        }
+      }
       work.ctx.restore();
       return { canvas: work.canvas, sx: offsetX, sy: offsetY };
     }
 
-    // Fallback for Safari < 18: three bilinear downscale/upscale passes give a
-    // convincing box-blur approximation using only widely supported APIs.
+    work.ctx.save();
+    work.ctx.setTransform(1, 0, 0, 1, 0, 0);
+    if (style === 'box') {
+      work.ctx.drawImage(ctx.canvas as CanvasImageSource, px, py, pw, ph, 0, 0, pw, ph);
+      work.ctx.restore();
+      this.boxBlur(work, pw, ph, radius);
+      return { canvas: work.canvas, sx: offsetX, sy: offsetY };
+    }
+
+    if (supportsCanvasFilter()) {
+      work.ctx.filter = 'blur(' + radius + 'px)';
+      work.ctx.drawImage(ctx.canvas as CanvasImageSource, px, py, pw, ph, 0, 0, pw, ph);
+      work.ctx.filter = 'none';
+      work.ctx.restore();
+      if (style === 'frosted') this.addFrostGrain(work, pw, ph, px, py, grain);
+      return { canvas: work.canvas, sx: offsetX, sy: offsetY };
+    }
+
+    // Safari < 18: bilinear downscale/upscale approximates Gaussian blur.
     work.ctx.imageSmoothingEnabled = true;
     work.ctx.imageSmoothingQuality = 'high';
     work.ctx.drawImage(ctx.canvas as CanvasImageSource, px, py, pw, ph, 0, 0, pw, ph);
     work.ctx.restore();
-
     const factor = clamp(1 / Math.max(1.5, radius / 1.6), 0.02, 0.6);
     const tw = Math.max(1, Math.round(pw * factor));
     const th = Math.max(1, Math.round(ph * factor));
@@ -449,6 +591,7 @@ export class Compositor {
       work.ctx.drawImage(temp.canvas, 0, 0, tw, th, 0, 0, pw, ph);
       work.ctx.restore();
     }
+    if (style === 'frosted') this.addFrostGrain(work, pw, ph, px, py, grain);
     return { canvas: work.canvas, sx: offsetX, sy: offsetY };
   }
 }

@@ -99,6 +99,7 @@ export interface Sticker {
 
 export type CensorShape = 'rect' | 'circle';
 export type CensorEffect = 'blur' | 'pixelate' | 'black';
+export type BlurType = 'gaussian' | 'box' | 'motion' | 'radial' | 'frosted';
 
 /**
  * A censor position at a point in time. Regions always hold at least one
@@ -121,6 +122,14 @@ export interface CensorRegion {
   effect: CensorEffect;
   /** 0..1, mapped to a pixel radius / block size at render time. */
   strength: number;
+  /** Optional for projects saved before blur styles were available. */
+  blurType?: BlurType;
+  /** 0..1: inward alpha feathering at the blur region boundary. */
+  feather?: number;
+  /** Motion blur direction in degrees, 0 horizontal / 90 vertical. */
+  motionAngle?: number;
+  /** 0..1: texture strength for the frosted blur style. */
+  grain?: number;
   range: TimeRange | null;
   /** Sorted by `t`, never empty. */
   keyframes: CensorKeyframe[];

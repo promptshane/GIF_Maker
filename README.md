@@ -157,6 +157,15 @@ proportional to canvas size, so it stays a faithful scaled copy.
 
 ### Censor regions
 
+Blur regions support five styles: **Gaussian** (the original default),
+**Box** (uniform-kernel smoothing), **Motion** (directional streaks with an angle
+control), **Radial** (zoom streaks centred on the region), and **Frosted**
+(Gaussian blur with stable, adjustable film grain). Every blur style also has
+**Edge feathering** (0–100%), fading its boundary into the original image.
+Older saved projects without style/feather settings still load as hard-edged
+Gaussian blur. Styles and feather settings are part of each region, saved with
+projects, and rendered identically in preview and export.
+
 Blur radius and pixel block size are set by the **strength** slider as a
 fraction of the canvas's shorter side — never of the region. Resizing a region
 to cover more of a face does not also make its blur softer or its blocks

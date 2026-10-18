@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { blurRadius, censorPixelGeometry, pixelBlockSize } from '../../src/render/compose';
+import { blurRadius, censorPixelGeometry, featherOpacity, pixelBlockSize } from '../../src/render/compose';
 
 // Both maps take only the strength and the canvas's short side — the region's
 // own size is deliberately not an input, so a bigger region gets the same blur
@@ -46,5 +46,20 @@ describe('censor animated size geometry', () => {
     // Whole-pixel sampling still fully covers the fractional visible clip.
     expect(a.sampleX).toBeLessThanOrEqual(a.left);
     expect(a.sampleX + a.sampleW).toBeGreaterThanOrEqual(a.left + a.clipW);
+  });
+});
+
+describe('blur edge feathering', () => {
+  it('transitions smoothly from transparent border to opaque interior', () => {
+    expect(featherOpacity(-1, 12)).toBe(0);
+    expect(featherOpacity(0, 12)).toBe(0);
+    expect(featherOpacity(6, 12)).toBeCloseTo(0.5);
+    expect(featherOpacity(12, 12)).toBe(1);
+    expect(featherOpacity(30, 12)).toBe(1);
+  });
+
+  it('retains a hard edge at zero feather', () => {
+    expect(featherOpacity(0, 0)).toBe(1);
+    expect(featherOpacity(-0.1, 0)).toBe(0);
   });
 });

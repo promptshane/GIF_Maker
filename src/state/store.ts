@@ -1028,6 +1028,10 @@ export const useStore = create<AppState>()((set, get) => {
         shape,
         effect,
         strength: 0.6,
+        blurType: 'gaussian',
+        feather: 0,
+        motionAngle: 0,
+        grain: 0.5,
         range: null,
         keyframes: [
           effect === 'black'

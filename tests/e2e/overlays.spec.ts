@@ -120,4 +120,40 @@ test.describe('Censor', () => {
     const weak = frameRgb(await readResultGif(page), 0);
     expect(frameDifference(blurred.data, weak.data)).toBeGreaterThan(0.5);
   });
+  test('all five blur styles and edge feathering affect the exported image', async ({ page }) => {
+    await openApp(page);
+    await importPhotos(page, [PHOTOS[0]]);
+    await openTab(page, 'Censor');
+    await page.getByRole('button', { name: '+ Blur box' }).click();
+    await page.getByRole('slider', { name: 'Censor strength' }).fill('85');
+    await page.getByRole('slider', { name: 'Censor width' }).fill('70');
+    await page.getByRole('slider', { name: 'Censor height' }).fill('70');
+
+    const styles = ['gaussian', 'box', 'motion', 'radial', 'frosted'];
+    const frames = new Map<string, ReturnType<typeof frameRgb>>();
+    for (const style of styles) {
+      await page.getByRole('combobox', { name: 'Blur type' }).selectOption(style);
+      if (style === 'motion') {
+        await page.getByRole('slider', { name: 'Motion angle' }).fill('35');
+      }
+      if (style === 'frosted') {
+        await page.getByRole('slider', { name: 'Frosted grain' }).fill('90');
+      }
+      await generate(page);
+      frames.set(style, frameRgb(await readResultGif(page), 0));
+      await backToEditor(page);
+    }
+
+    const gaussian = frames.get('gaussian')!;
+    for (const style of styles.slice(1)) {
+      expect(frameDifference(gaussian.data, frames.get(style)!.data)).toBeGreaterThan(0.1);
+    }
+
+    await page.getByRole('combobox', { name: 'Blur type' }).selectOption('gaussian');
+    await page.getByRole('slider', { name: 'Edge feathering' }).fill('90');
+    await generate(page);
+    const feathered = frameRgb(await readResultGif(page), 0);
+    expect(frameDifference(gaussian.data, feathered.data)).toBeGreaterThan(0.1);
+  });
+
 });
