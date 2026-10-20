@@ -393,6 +393,51 @@ button {
   touch-action: none;
 }
 
+.stage-inner.censor-viewport {
+  overflow: hidden;
+  border-radius: 6px;
+}
+
+.stage-content {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.preview-zoom-controls {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: 999px;
+  padding: 3px;
+  background: rgba(10, 10, 16, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #fff;
+}
+
+.preview-zoom-controls button {
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  min-width: 30px;
+  height: 30px;
+  font-size: 19px;
+  touch-action: manipulation;
+}
+.preview-zoom-controls button:disabled { opacity: 0.3; }
+.preview-zoom-controls button:not(:disabled):active { background: rgba(255, 255, 255, 0.16); }
+.preview-zoom-controls .preview-zoom-level {
+  min-width: 51px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
 .stage-inner canvas {
   display: block;
   width: 100%;

@@ -118,6 +118,80 @@ test.describe('Censor editing', () => {
     await expect(selected).toHaveCount(0);
   });
 
+
+  test('preview zoom scales position, size and drag precision', async ({ page }) => {
+    await openApp(page);
+    await importPhotos(page, [PHOTOS[0]]);
+    await openTab(page, 'Censor');
+    await page.getByRole('button', { name: '+ Blur box' }).click();
+
+    const stage = (await page.locator('.stage-inner').boundingBox())!;
+    const region = page.locator('.selection-box.censor').first();
+    const beforeNormal = (await region.boundingBox())!;
+    await page.getByRole('button', { name: 'Nudge right' }).click();
+    const afterNormal = (await region.boundingBox())!;
+    expect((afterNormal.x - beforeNormal.x) / stage.width).toBeCloseTo(0.01, 3);
+
+    await page.getByRole('button', { name: 'Zoom in preview' }).click();
+    await expect(page.getByRole('button', { name: 'Reset preview zoom' })).toHaveText('150%');
+    const zoom = 1.5;
+    const beforeNudge = (await region.boundingBox())!;
+    await page.getByRole('button', { name: 'Nudge right' }).click();
+    const afterNudge = (await region.boundingBox())!;
+    expect((afterNudge.x - beforeNudge.x) / (stage.width * zoom)).toBeCloseTo(0.01 / zoom, 3);
+
+    const beforeSize = (await region.boundingBox())!;
+    await page.getByRole('button', { name: 'Wider' }).click();
+    await page.getByRole('button', { name: 'Taller' }).click();
+    const afterSize = (await region.boundingBox())!;
+    expect((afterSize.width - beforeSize.width) / (stage.width * zoom)).toBeCloseTo(0.01 / zoom, 3);
+    expect((afterSize.height - beforeSize.height) / (stage.height * zoom)).toBeCloseTo(0.01 / zoom, 3);
+
+    const beforeDrag = (await region.boundingBox())!;
+    const cx = beforeDrag.x + beforeDrag.width / 2;
+    const cy = beforeDrag.y + beforeDrag.height / 2;
+    await page.mouse.move(cx, cy);
+    await page.mouse.down();
+    await page.mouse.move(cx + 24, cy + 12, { steps: 4 });
+    await page.mouse.up();
+    const afterDrag = (await region.boundingBox())!;
+    expect(afterDrag.x - beforeDrag.x).toBeCloseTo(24, 0);
+    expect(afterDrag.y - beforeDrag.y).toBeCloseTo(12, 0);
+
+    await page.getByRole('button', { name: 'Reset preview zoom' }).click();
+    await expect(page.getByRole('button', { name: 'Reset preview zoom' })).toHaveText('100%');
+  });
+
+  test('two-finger pinch zooms the preview without resizing a censor', async ({ page }) => {
+    await openApp(page);
+    await importPhotos(page, [PHOTOS[0]]);
+    await openTab(page, 'Censor');
+    await page.getByRole('button', { name: '+ Blur box' }).click();
+
+    const stage = page.locator('.stage-inner');
+    const region = page.locator('.selection-box.censor').first();
+    const original = (await region.boundingBox())!;
+    await stage.evaluate((node) => {
+      const rect = node.getBoundingClientRect();
+      const x = rect.left + rect.width / 2;
+      const y = rect.top + 8;
+      const emit = (type: string, pointerId: number, clientX: number) => {
+        node.dispatchEvent(new PointerEvent(type, {
+          bubbles: true, pointerType: 'touch', pointerId, clientX, clientY: y,
+        }));
+      };
+      emit('pointerdown', 41, x - 20);
+      emit('pointerdown', 42, x + 20);
+      emit('pointermove', 42, x + 60);
+      emit('pointerup', 42, x + 60);
+      emit('pointerup', 41, x - 20);
+    });
+    await expect(page.getByRole('button', { name: 'Reset preview zoom' })).toHaveText('200%');
+    const magnified = (await region.boundingBox())!;
+    expect(magnified.width / original.width).toBeCloseTo(2, 1);
+    expect(magnified.height / original.height).toBeCloseTo(2, 1);
+  });
+
   test('strength does not change with the size of the region', async ({ page }) => {
     await openApp(page);
     await importPhotos(page, [PHOTOS[0]]);

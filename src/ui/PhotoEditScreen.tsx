@@ -1,4 +1,4 @@
-import { useMemo, useRef } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useStore, type EditTool } from '../state/store';
 import { useFramePlan, usePreviewProvider, useRenderSettings } from '../state/hooks';
 import { useFitBox } from './gestures';
@@ -30,6 +30,7 @@ export function PhotoEditScreen() {
   const source = plan.frames[0]?.source ?? null;
   const preview = usePhotoPreview(provider, source, settings, quality);
   const stageRef = useRef<HTMLDivElement | null>(null);
+  const [censorZoom, setCensorZoom] = useState(1);
   const box = useFitBox(stageRef, settings.width / settings.height, immersive ? 8 : 24);
 
   const activeTool = useMemo<EditTool>(() =>
@@ -52,6 +53,7 @@ export function PhotoEditScreen() {
           outputWidth={settings.width}
           outputHeight={settings.height}
           previewLabel="Edited photo preview"
+          onZoomChange={setCensorZoom}
         />
 
         <button
@@ -75,7 +77,7 @@ export function PhotoEditScreen() {
       {!immersive && (
         <>
           <div className="tool-panel photo-tools">
-            {activeTool === 'censor' && <CensorPanel playheadMs={0} durationMs={0} staticImage />}
+            {activeTool === 'censor' && <CensorPanel playheadMs={0} durationMs={0} staticImage zoom={censorZoom} />}
             {activeTool === 'quality' && <PhotoQualityPanel bytes={preview.result?.bytes} />}
           </div>
 

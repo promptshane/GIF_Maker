@@ -18,7 +18,7 @@ const SHAPES: Array<{ value: CensorShape; label: string }> = [
 ];
 
 /** One nudge or step, as a fraction of the canvas: ~5px on a 480px output. */
-const STEP = 0.01;
+const BASE_STEP = 0.01;
 const MIN_SIZE = 0.02;
 const MAX_SIZE = 1.5;
 
@@ -33,10 +33,12 @@ export function CensorPanel({
   playheadMs,
   durationMs,
   staticImage = false,
+  zoom = 1,
 }: {
   playheadMs: number;
   durationMs: number;
   staticImage?: boolean;
+  zoom?: number;
 }) {
   const censors = useStore((state) => state.censors);
   const selectedId = useStore((state) => state.selectedOverlayId);
@@ -51,6 +53,9 @@ export function CensorPanel({
 
   const selected = censors.find((region) => region.id === selectedId) ?? null;
   const rect = selected ? censorRectAt(selected, playheadMs) : null;
+  const step = BASE_STEP / Math.max(1, zoom);
+  const positionPercent = (value: number) =>
+    zoom > 1 ? `${Number((value * 100).toFixed(2))}%` : `${Math.round(value * 100)}%`;
 
   const nudge = (dx: number, dy: number) => {
     if (!selected || !rect) return;
@@ -256,7 +261,7 @@ export function CensorPanel({
               <RepeatButton
                 className="step-btn"
                 label="Narrower"
-                onPress={() => resize({ w: rect.w - STEP })}
+                onPress={() => resize({ w: rect.w - step })}
               >
                 −
               </RepeatButton>
@@ -264,7 +269,7 @@ export function CensorPanel({
                 type="range"
                 min={2}
                 max={150}
-                step={0.1}
+                step={zoom > 1 ? 0.01 : 0.1}
                 value={rect.w * 100}
                 aria-label="Censor width"
                 onChange={(event) => resize({ w: Number(event.target.value) / 100 })}
@@ -272,7 +277,7 @@ export function CensorPanel({
               <RepeatButton
                 className="step-btn"
                 label="Wider"
-                onPress={() => resize({ w: rect.w + STEP })}
+                onPress={() => resize({ w: rect.w + step })}
               >
                 +
               </RepeatButton>
@@ -282,7 +287,7 @@ export function CensorPanel({
               <RepeatButton
                 className="step-btn"
                 label="Shorter"
-                onPress={() => resize({ h: rect.h - STEP })}
+                onPress={() => resize({ h: rect.h - step })}
               >
                 −
               </RepeatButton>
@@ -290,7 +295,7 @@ export function CensorPanel({
                 type="range"
                 min={2}
                 max={150}
-                step={0.1}
+                step={zoom > 1 ? 0.01 : 0.1}
                 value={rect.h * 100}
                 aria-label="Censor height"
                 onChange={(event) => resize({ h: Number(event.target.value) / 100 })}
@@ -298,7 +303,7 @@ export function CensorPanel({
               <RepeatButton
                 className="step-btn"
                 label="Taller"
-                onPress={() => resize({ h: rect.h + STEP })}
+                onPress={() => resize({ h: rect.h + step })}
               >
                 +
               </RepeatButton>
@@ -307,26 +312,27 @@ export function CensorPanel({
 
           <Field
             label="Position"
-            value={`${Math.round(rect.x * 100)}%, ${Math.round(rect.y * 100)}%`}
+            value={`${positionPercent(rect.x)}, ${positionPercent(rect.y)}`}
           >
             <div className="nudge-pad">
-              <RepeatButton className="step-btn" label="Nudge left" onPress={() => nudge(-STEP, 0)}>
+              <RepeatButton className="step-btn" label="Nudge left" onPress={() => nudge(-step, 0)}>
                 ←
               </RepeatButton>
               <div className="nudge-stack">
-                <RepeatButton className="step-btn" label="Nudge up" onPress={() => nudge(0, -STEP)}>
+                <RepeatButton className="step-btn" label="Nudge up" onPress={() => nudge(0, -step)}>
                   ↑
                 </RepeatButton>
-                <RepeatButton className="step-btn" label="Nudge down" onPress={() => nudge(0, STEP)}>
+                <RepeatButton className="step-btn" label="Nudge down" onPress={() => nudge(0, step)}>
                   ↓
                 </RepeatButton>
               </div>
-              <RepeatButton className="step-btn" label="Nudge right" onPress={() => nudge(STEP, 0)}>
+              <RepeatButton className="step-btn" label="Nudge right" onPress={() => nudge(step, 0)}>
                 →
               </RepeatButton>
               <div className="hint nudge-hint">
-                Tap to move the region 1% at a time, or hold to keep moving. Drag it on the preview
-                for big moves.
+                {zoom > 1
+                  ? `At ${Math.round(zoom * 100)}% zoom, each tap moves ${Number((step * 100).toFixed(2))}% of the image. Hold to repeat.`
+                  : 'Tap to move the region 1% at a time, or hold to keep moving. Drag on the preview for big moves.'}
               </div>
             </div>
           </Field>

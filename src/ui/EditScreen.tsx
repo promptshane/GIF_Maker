@@ -56,6 +56,7 @@ export function EditScreen() {
   const player = usePreviewPlayer(plan, settings, provider, scrub);
 
   const [cropping, setCropping] = useState(false);
+  const [censorZoom, setCensorZoom] = useState(1);
   const stageRef = useRef<HTMLDivElement | null>(null);
   // Held for the duration of a censor drag so every pointer event edits one
   // frozen frame even if React rerenders while the gesture is in progress.
@@ -174,6 +175,7 @@ export function EditScreen() {
             }
             outputWidth={settings.width}
             outputHeight={settings.height}
+            onZoomChange={setCensorZoom}
           />
         )}
 
@@ -210,7 +212,7 @@ export function EditScreen() {
               <StickerPanel playheadMs={player.timeMs} durationMs={plan.durationMs} />
             )}
             {tool === 'censor' && (
-              <CensorPanel playheadMs={player.timeMs} durationMs={plan.durationMs} />
+              <CensorPanel playheadMs={player.timeMs} durationMs={plan.durationMs} zoom={censorZoom} />
             )}
             {tool === 'canvas' && <FramePanel cropping={cropping} onToggleCrop={setCropping} />}
           </div>

@@ -3,6 +3,7 @@ import type { CensorRegion, Sticker } from '../state/types';
 import { censorRectAt, isActiveAt } from '../render/timeline';
 import { clamp } from '../render/geometry';
 import { useGesture } from './gestures';
+import { useCensorPreviewZoom, MAX_CENSOR_ZOOM } from './useCensorPreviewZoom';
 
 export type StageMode = 'view' | 'stickers' | 'censor';
 
@@ -25,6 +26,7 @@ interface StageProps {
   outputWidth: number;
   outputHeight: number;
   previewLabel?: string;
+  onZoomChange?: (zoom: number) => void;
 }
 
 /**
@@ -41,12 +43,45 @@ interface StageProps {
  */
 export function PreviewStage(props: StageProps) {
   const { canvasRef, box, mode } = props;
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const { view, zoomBy, resetZoom, pointerCountRef, suppressCensorDragRef } =
+    useCensorPreviewZoom(viewportRef, mode === 'censor', box, props.onZoomChange);
 
   return (
-    <div className="stage-inner" style={{ width: box.width, height: box.height }}>
-      <canvas ref={canvasRef} aria-label={props.previewLabel ?? 'GIF preview'} />
-      {mode === 'stickers' && <StickerLayer {...props} />}
-      {mode === 'censor' && <CensorLayer {...props} />}
+    <div
+      ref={viewportRef}
+      className={`stage-inner${mode === 'censor' ? ' censor-viewport' : ''}`}
+      style={{ width: box.width, height: box.height }}
+    >
+      <div
+        className="stage-content"
+        style={{
+          transformOrigin: '0 0',
+          transform: mode === 'censor'
+            ? `translate(${view.x}px, ${view.y}px) scale(${view.zoom})`
+            : undefined,
+        }}
+      >
+        <canvas ref={canvasRef} aria-label={props.previewLabel ?? 'GIF preview'} />
+        {mode === 'stickers' && <StickerLayer {...props} />}
+        {mode === 'censor' && (
+          <CensorLayer
+            {...props}
+            zoom={view.zoom}
+            pointerCountRef={pointerCountRef}
+            suppressCensorDragRef={suppressCensorDragRef}
+          />
+        )}
+      </div>
+      {mode === 'censor' && (
+        <div className="preview-zoom-controls" role="group" aria-label="Censor preview zoom">
+          <button type="button" aria-label="Zoom out preview" disabled={view.zoom <= 1} onClick={() => zoomBy(1 / 1.5)}>−</button>
+          <button type="button" className="preview-zoom-level" aria-label="Reset preview zoom" onClick={resetZoom} title="Reset preview zoom">
+            {Math.round(view.zoom * 100)}%
+          </button>
+          <button type="button" aria-label="Zoom in preview" disabled={view.zoom >= MAX_CENSOR_ZOOM} onClick={() => zoomBy(1.5)}>+</button>
+        </div>
+      )}
     </div>
   );
 }
@@ -193,7 +228,14 @@ function CensorLayer({
   onStartCensorEdit,
   onEndCensorEdit,
   onMoveCensor,
-}: StageProps) {
+  zoom,
+  pointerCountRef,
+  suppressCensorDragRef,
+}: StageProps & {
+  zoom: number;
+  pointerCountRef: { current: number };
+  suppressCensorDragRef: { current: boolean };
+}) {
   const visible = censors.filter((region) => isActiveAt(region.range, timeMs));
   const [guides, setGuides] = useState<{ x: number | null; y: number | null }>({ x: null, y: null });
   const timerRef = useRef<number | null>(null);
@@ -252,6 +294,9 @@ function CensorLayer({
           onChange={(rect) => onMoveCensor(region.id, rect)}
           peers={visible}
           onAlign={showGuides}
+          zoom={zoom}
+          pointerCountRef={pointerCountRef}
+          suppressCensorDragRef={suppressCensorDragRef}
         />
       ))}
       {guides.x !== null && (
@@ -284,6 +329,9 @@ function CensorBox({
   onChange,
   peers,
   onAlign,
+  zoom,
+  pointerCountRef,
+  suppressCensorDragRef,
 }: {
   region: CensorRegion;
   timeMs: number;
@@ -295,6 +343,9 @@ function CensorBox({
   onChange: (rect: { x: number; y: number; w: number; h: number }) => void;
   peers: CensorRegion[];
   onAlign: (guides: { x: number | null; y: number | null }) => void;
+  zoom: number;
+  pointerCountRef: { current: number };
+  suppressCensorDragRef: { current: boolean };
 }) {
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const rect = censorRectAt(region, timeMs);
@@ -315,33 +366,31 @@ function CensorBox({
 
   useGesture(bodyRef, {
     onStart: () => {
+      if (pointerCountRef.current !== 1 || suppressCensorDragRef.current) return;
       onSelect();
       const frozen = onEditStart?.();
       dragTimeRef.current = frozen ?? timeMs;
       dragRectRef.current = censorRectAt(region, dragTimeRef.current);
     },
     onMove: (info) => {
+      if (pointerCountRef.current !== 1 || suppressCensorDragRef.current) return;
       // Accumulate against the last gesture position rather than waiting for a
       // React rerender between pointer events. Fast drags therefore stay 1:1
       // with the finger/mouse instead of dropping movement and feeling elastic.
       const base = dragRectRef.current ?? rect;
       const next = {
-        x: clamp(base.x + info.dx / box.width, 0, 1),
-        y: clamp(base.y + info.dy / box.height, 0, 1),
+        x: clamp(base.x + info.dx / (box.width * zoom), 0, 1),
+        y: clamp(base.y + info.dy / (box.height * zoom), 0, 1),
         w: base.w,
         h: base.h,
       };
-      if (info.pointers >= 2) {
-        next.w = clamp(base.w * info.scale, 0.02, 2);
-        next.h = clamp(base.h * info.scale, 0.02, 2);
-      }
       dragRectRef.current = next;
 
       // Keep the alignment guide as a visual hint, but never alter geometry.
       // The old implementation physically snapped matching regions together
       // within six screen pixels, which made precise nearby placement feel magnetic.
-      const guideX = 6 / Math.max(1, box.width);
-      const guideY = 6 / Math.max(1, box.height);
+      const guideX = 6 / Math.max(1, box.width * zoom);
+      const guideY = 6 / Math.max(1, box.height * zoom);
       let x: number | null = null;
       let y: number | null = null;
       const editTime = dragTimeRef.current ?? timeMs;
