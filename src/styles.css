@@ -424,7 +424,7 @@ button {
 }
 
 .preview-zoom-controls.is-visible,
-.preview-zoom-controls:focus-within {
+.preview-zoom-controls:has(button:focus-visible) {
   opacity: 1;
   pointer-events: auto;
 }
