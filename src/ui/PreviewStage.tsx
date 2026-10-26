@@ -359,7 +359,8 @@ function CensorLayer({
   pointerCountRef: { current: number };
   suppressCensorDragRef: { current: boolean };
 }) {
-  const visible = censors.filter((region) => region.shape !== 'brush' && isActiveAt(region.range, timeMs));
+  const visible = censors.filter((region) => isActiveAt(region.range, timeMs));
+  const boxRegions = visible.filter((region) => region.shape !== 'brush');
   const [guides, setGuides] = useState<{ x: number | null; y: number | null }>({ x: null, y: null });
   const timerRef = useRef<number | null>(null);
   const alignedRef = useRef({ x: false, y: false });
@@ -385,7 +386,7 @@ function CensorLayer({
     const here = censorRectAt(selected, timeMs);
     let x: number | null = null;
     let y: number | null = null;
-    for (const other of visible) {
+    for (const other of boxRegions) {
       if (other.id === selected.id) continue;
       const there = censorRectAt(other, timeMs);
       const sameSize = Math.abs(here.w - there.w) < 0.0005 && Math.abs(here.h - there.h) < 0.0005;
@@ -404,7 +405,10 @@ function CensorLayer({
     <div className="overlay-layer" onPointerDown={(event) => {
       if (event.target === event.currentTarget) onSelect(null);
     }}>
-      {visible.map((region) => (
+      {visible.map((region) => region.shape === 'brush' ? (
+        <BrushSelectionOutline key={region.id} region={region} box={box}
+          selected={region.id === selectedId} />
+      ) : (
         <CensorBox
           key={region.id}
           region={region}
@@ -415,7 +419,7 @@ function CensorLayer({
           onEditStart={onStartCensorEdit}
           onEditEnd={onEndCensorEdit}
           onChange={(rect) => onMoveCensor(region.id, rect)}
-          peers={visible}
+          peers={boxRegions}
           onAlign={showGuides}
           zoom={zoom}
           pointerCountRef={pointerCountRef}
@@ -434,6 +438,37 @@ function CensorLayer({
 
 /** How long a censor region's outline stays up after it is selected or moved. */
 const CENSOR_OUTLINE_MS = 1100;
+
+/** Briefly highlight a selected brush stroke, without covering the result
+ * permanently or interfering with painting and pan gestures. */
+function BrushSelectionOutline({ region, box, selected }: {
+  region: CensorRegion;
+  box: { width: number; height: number };
+  selected: boolean;
+}) {
+  const [flash, setFlash] = useState(false);
+  useEffect(() => {
+    if (!selected) { setFlash(false); return; }
+    setFlash(true);
+    const timer = window.setTimeout(() => setFlash(false), CENSOR_OUTLINE_MS);
+    return () => window.clearTimeout(timer);
+  }, [selected, region.brush]);
+  const stroke = region.brush;
+  if (!flash || !stroke?.points.length) return null;
+  const radius = stroke.size * Math.min(box.width, box.height) / 2;
+  return (
+    <svg className="brush-selection-outline" width="100%" height="100%"
+      viewBox={`0 0 ${box.width} ${box.height}`} preserveAspectRatio="none" aria-hidden="true">
+      <polyline points={stroke.points.map((p) => `${p.x * box.width},${p.y * box.height}`).join(' ')}
+        fill="none" stroke="rgba(165, 130, 255, .32)"
+        strokeWidth={radius * 2 + 4} strokeLinecap="round" strokeLinejoin="round" />
+      {stroke.points.length === 1 && (
+        <circle cx={stroke.points[0].x * box.width} cy={stroke.points[0].y * box.height}
+          r={radius + 2} fill="rgba(165, 130, 255, .32)" />
+      )}
+    </svg>
+  );
+}
 
 /**
  * A censor region's hit area, and a brief outline so you know which one you
