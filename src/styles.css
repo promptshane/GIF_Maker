@@ -418,6 +418,19 @@ button {
   background: rgba(10, 10, 16, 0.8);
   border: 1px solid rgba(255, 255, 255, 0.18);
   color: #fff;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 220ms ease;
+}
+
+.preview-zoom-controls.is-visible,
+.preview-zoom-controls:focus-within {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .preview-zoom-controls { transition: none; }
 }
 
 .preview-zoom-controls button {
