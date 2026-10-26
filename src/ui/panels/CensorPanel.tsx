@@ -313,6 +313,17 @@ export function CensorPanel({
             </>
           )}
 
+          {selected.shape === 'brush' && selected.brush && (
+            <Field label="Stroke width" value={`${Math.round(selected.brush.size * 100)}%`}>
+              <input type="range" min={1} max={25}
+                aria-label="Stroke width"
+                value={Math.round(selected.brush.size * 100)}
+                onChange={(event) => updateCensor(selected.id, {
+                  brush: { ...selected.brush!, size: Number(event.target.value) / 100 },
+                })} />
+            </Field>
+          )}
+
           {selected.shape !== 'brush' && (<>
           <Field label="Size" value={`${formatSizePercent(rect.w)} × ${formatSizePercent(rect.h)}`}>
             <div className="size-axis-label">Horizontal</div>
