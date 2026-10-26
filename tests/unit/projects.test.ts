@@ -72,6 +72,31 @@ describe('project serialisation', () => {
     expect(data.edits.censors[0]).not.toBe(source.censors[0]);
   });
 
+  it('keeps freehand brush points independent when saving and duplicating projects', () => {
+    const source: ProjectSource = {
+      kind: 'photos',
+      photos: [photo('p1', new Blob(['a']), 300)],
+      video: null,
+      ...edits(),
+      censors: [{
+        id: 'brush1', shape: 'brush', effect: 'smear', strength: 0.7,
+        brush: { size: 0.08, points: [{ x: 0.2, y: 0.3 }, { x: 0.8, y: 0.7 }] },
+        range: null,
+        keyframes: [{ t: 0, x: 0.5, y: 0.5, w: 1, h: 1 }],
+      }],
+    };
+    const saved = toProjectData('brush', source);
+    source.censors[0].brush!.points[0].x = 0.9;
+    expect(saved.edits.censors[0].brush!.points[0].x).toBe(0.2);
+
+    const copy = duplicateProjectRecords({
+      id: 'brush', name: 'Brush', savedAt: 1, kind: 'photos', mode: 'photo',
+      thumb: null, bytes: 1, durationMs: 300, photoCount: 1,
+    }, saved, 'brush-copy');
+    copy.data.edits.censors[0].brush!.points[0].x = 0.1;
+    expect(saved.edits.censors[0].brush!.points[0].x).toBe(0.2);
+  });
+
   it('stores a video as its single file with the edits', () => {
     const clip = new Blob(['xyz'], { type: 'video/mp4' });
     const data = toProjectData('id2', {
