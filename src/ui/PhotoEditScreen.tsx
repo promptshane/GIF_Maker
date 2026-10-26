@@ -19,6 +19,7 @@ export function PhotoEditScreen() {
   const setTool = useStore((state) => state.setTool);
   const quality = useStore((state) => state.photoQuality);
   const censors = useStore((state) => state.censors);
+  const firstPhoto = useStore((state) => state.photos[0] ?? null);
   const selectedId = useStore((state) => state.selectedOverlayId);
   const selectOverlay = useStore((state) => state.selectOverlay);
   const setCensorRect = useStore((state) => state.setCensorRect);
@@ -41,15 +42,23 @@ export function PhotoEditScreen() {
   const box = useFitBox(stageRef, settings.width / settings.height, immersive ? 8 : 24);
 
   const autoCensorFaces = async () => {
-    const canvas = preview.canvasRef.current;
-    if (!canvas || preview.rendering || detectingFaces) {
+    const previewCanvas = preview.canvasRef.current;
+    if (!previewCanvas || !firstPhoto || preview.rendering || detectingFaces) {
       setFaceStatus('Image preview is not ready yet.');
       return;
     }
     setDetectingFaces(true);
     setFaceStatus(null);
     try {
-      const faces = await detectFaces(canvas);
+      // Detect from the unedited source, not a preview that may already be
+      // blurred, so repeat detection remains useful after adding regions.
+      const sourceCanvas = document.createElement('canvas');
+      sourceCanvas.width = previewCanvas.width;
+      sourceCanvas.height = previewCanvas.height;
+      const context = sourceCanvas.getContext('2d');
+      if (!context) throw new Error('Canvas unavailable');
+      context.drawImage(firstPhoto.image, 0, 0, sourceCanvas.width, sourceCanvas.height);
+      const faces = await detectFaces(sourceCanvas);
       if (faces.length) addFaceCensors(faces);
       setFaceStatus(faces.length
         ? `Added blur regions to ${faces.length} face${faces.length === 1 ? '' : 's'}. Review coverage before exporting.`
