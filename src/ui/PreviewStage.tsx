@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { CensorRegion, Sticker } from '../state/types';
+import type { BrushPoint, CensorRegion, Sticker } from '../state/types';
 import { censorRectAt, isActiveAt } from '../render/timeline';
 import { clamp } from '../render/geometry';
 import { useGesture } from './gestures';
@@ -27,6 +27,9 @@ interface StageProps {
   outputHeight: number;
   previewLabel?: string;
   onZoomChange?: (zoom: number) => void;
+  brushActive?: boolean;
+  brushSize?: number;
+  onBrushStroke?: (points: BrushPoint[], size: number) => void;
 }
 
 /**
@@ -45,7 +48,7 @@ export function PreviewStage(props: StageProps) {
   const { canvasRef, box, mode } = props;
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const { view, zoomBy, resetZoom, pointerCountRef, suppressCensorDragRef } =
-    useCensorPreviewZoom(viewportRef, mode === 'censor', box, props.onZoomChange);
+    useCensorPreviewZoom(viewportRef, mode === 'censor' && !props.brushActive, box, props.onZoomChange);
   const [zoomControlsVisible, setZoomControlsVisible] = useState(false);
   const zoomControlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -103,7 +106,7 @@ export function PreviewStage(props: StageProps) {
       >
         <canvas ref={canvasRef} aria-label={props.previewLabel ?? 'GIF preview'} />
         {mode === 'stickers' && <StickerLayer {...props} />}
-        {mode === 'censor' && (
+        {mode === 'censor' && !props.brushActive && (
           <CensorLayer
             {...props}
             zoom={view.zoom}
@@ -111,8 +114,15 @@ export function PreviewStage(props: StageProps) {
             suppressCensorDragRef={suppressCensorDragRef}
           />
         )}
+        {mode === 'censor' && props.brushActive && props.onBrushStroke && (
+          <BrushDrawingLayer
+            box={box}
+            size={props.brushSize ?? 0.07}
+            onStroke={props.onBrushStroke}
+          />
+        )}
       </div>
-      {mode === 'censor' && (
+      {mode === 'censor' && !props.brushActive && (
         <div className={`preview-zoom-controls${zoomControlsVisible ? ' is-visible' : ''}`} role="group" aria-label="Censor preview zoom">
           <button type="button" aria-label="Zoom out preview" disabled={view.zoom <= 1} onClick={() => zoomBy(1 / 1.5)}>−</button>
           <button type="button" className="preview-zoom-level" aria-label="Reset preview zoom" onClick={resetZoom} title="Reset preview zoom">
@@ -120,6 +130,80 @@ export function PreviewStage(props: StageProps) {
           </button>
           <button type="button" aria-label="Zoom in preview" disabled={view.zoom >= MAX_CENSOR_ZOOM} onClick={() => zoomBy(1.5)}>+</button>
         </div>
+      )}
+    </div>
+  );
+}
+
+/** Pointer drawing in output-space coordinates. Each completed stroke becomes
+ * a separately selectable region. No image bytes are stored in the stroke. */
+function BrushDrawingLayer({
+  box, size, onStroke,
+}: {
+  box: { width: number; height: number };
+  size: number;
+  onStroke: (points: BrushPoint[], size: number) => void;
+}) {
+  const activePointer = useRef<number | null>(null);
+  const strokeRef = useRef<BrushPoint[]>([]);
+  const [previewPoints, setPreviewPoints] = useState<BrushPoint[]>([]);
+
+  const pointAt = (element: HTMLDivElement, clientX: number, clientY: number): BrushPoint => {
+    const rect = element.getBoundingClientRect();
+    return {
+      x: clamp((clientX - rect.left) / rect.width, 0, 1),
+      y: clamp((clientY - rect.top) / rect.height, 0, 1),
+    };
+  };
+  const clear = () => {
+    activePointer.current = null;
+    strokeRef.current = [];
+    setPreviewPoints([]);
+  };
+  return (
+    <div className="brush-draw-layer" aria-label="Paint censor brush"
+      onPointerDown={(event) => {
+        if (activePointer.current !== null || (event.pointerType === 'mouse' && event.button !== 0)) return;
+        event.preventDefault();
+        activePointer.current = event.pointerId;
+        event.currentTarget.setPointerCapture(event.pointerId);
+        const point = pointAt(event.currentTarget, event.clientX, event.clientY);
+        strokeRef.current = [point];
+        setPreviewPoints([point]);
+      }}
+      onPointerMove={(event) => {
+        if (activePointer.current !== event.pointerId) return;
+        const next = pointAt(event.currentTarget, event.clientX, event.clientY);
+        const previous = strokeRef.current[strokeRef.current.length - 1];
+        if (previous && Math.hypot((next.x - previous.x) * box.width,
+          (next.y - previous.y) * box.height) < 2) return;
+        if (strokeRef.current.length >= 1200) return;
+        strokeRef.current = [...strokeRef.current, next];
+        setPreviewPoints(strokeRef.current);
+      }}
+      onPointerUp={(event) => {
+        if (activePointer.current !== event.pointerId) return;
+        const completed = strokeRef.current;
+        clear();
+        if (completed.length) onStroke(completed, size);
+      }}
+      onPointerCancel={(event) => {
+        if (activePointer.current === event.pointerId) clear();
+      }}
+    >
+      {previewPoints.length > 0 && (
+        <svg width="100%" height="100%" viewBox={`0 0 ${box.width} ${box.height}`}
+          preserveAspectRatio="none" aria-hidden="true">
+          <polyline points={previewPoints.map((p) => `${p.x * box.width},${p.y * box.height}`).join(' ')}
+            fill="none" stroke="rgba(147, 107, 255, 0.75)"
+            strokeWidth={size * Math.min(box.width, box.height)}
+            strokeLinecap="round" strokeLinejoin="round" />
+          {previewPoints.length === 1 && (
+            <circle cx={previewPoints[0].x * box.width} cy={previewPoints[0].y * box.height}
+              r={size * Math.min(box.width, box.height) / 2}
+              fill="rgba(147, 107, 255, 0.75)" />
+          )}
+        </svg>
       )}
     </div>
   );
@@ -275,7 +359,7 @@ function CensorLayer({
   pointerCountRef: { current: number };
   suppressCensorDragRef: { current: boolean };
 }) {
-  const visible = censors.filter((region) => isActiveAt(region.range, timeMs));
+  const visible = censors.filter((region) => region.shape !== 'brush' && isActiveAt(region.range, timeMs));
   const [guides, setGuides] = useState<{ x: number | null; y: number | null }>({ x: null, y: null });
   const timerRef = useRef<number | null>(null);
   const alignedRef = useRef({ x: false, y: false });
