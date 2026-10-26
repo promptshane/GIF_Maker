@@ -97,8 +97,12 @@ export interface Sticker {
   range: TimeRange | null;
 }
 
-export type CensorShape = 'rect' | 'circle';
-export type CensorEffect = 'blur' | 'pixelate' | 'black';
+export type CensorShape = 'rect' | 'circle' | 'brush';
+export type CensorEffect =
+  | 'blur' | 'pixelate' | 'black'
+  | 'smear' | 'noise' | 'color' | 'glass' | 'spotlight';
+export interface BrushPoint { x: number; y: number }
+export interface BrushStroke { points: BrushPoint[]; size: number }
 export type BlurType = 'gaussian' | 'box' | 'motion' | 'radial' | 'frosted';
 
 /**
@@ -130,6 +134,12 @@ export interface CensorRegion {
   motionAngle?: number;
   /** 0..1: texture strength for the frosted blur style. */
   grain?: number;
+  /** Hex fill for the color effect. */
+  color?: string;
+  /** Fill opacity (0..1) for the color effect. */
+  opacity?: number;
+  /** Static output-space brush path; shared across GIF frames. */
+  brush?: BrushStroke;
   range: TimeRange | null;
   /** Sorted by `t`, never empty. */
   keyframes: CensorKeyframe[];
