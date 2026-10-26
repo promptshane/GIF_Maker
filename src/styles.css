@@ -398,6 +398,20 @@ button {
   border-radius: 6px;
 }
 
+.brush-draw-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  cursor: crosshair;
+  touch-action: none;
+  user-select: none;
+}
+
+.brush-draw-layer svg {
+  display: block;
+  pointer-events: none;
+}
+
 .stage-content {
   position: absolute;
   inset: 0;
