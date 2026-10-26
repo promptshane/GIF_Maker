@@ -3,6 +3,7 @@ import type {
   CanvasPreset,
   CanvasSettings,
   CensorEffect,
+  BrushPoint,
   CensorRegion,
   CensorShape,
   CropRect,
@@ -193,6 +194,7 @@ interface AppState {
   removeSticker: (id: string) => void;
 
   addCensor: (effect: CensorEffect, shape: CensorShape) => void;
+  addBrushCensor: (points: BrushPoint[], size: number) => void;
   duplicateCensor: (id: string, timeMs: number) => void;
   updateCensor: (id: string, patch: Partial<Omit<CensorRegion, 'keyframes'>>) => void;
   removeCensor: (id: string) => void;
@@ -1032,6 +1034,8 @@ export const useStore = create<AppState>()((set, get) => {
         feather: 0,
         motionAngle: 0,
         grain: 0.5,
+        color: '#000000',
+        opacity: 1,
         range: null,
         keyframes: [
           effect === 'black'
@@ -1047,6 +1051,25 @@ export const useStore = create<AppState>()((set, get) => {
       });
     },
 
+    addBrushCensor: (points, size) => {
+      if (points.length === 0) return;
+      const region: CensorRegion = {
+        id: uid(), shape: 'brush', effect: 'blur', strength: 0.6,
+        blurType: 'gaussian', feather: 0, color: '#000000', opacity: 1,
+        range: null,
+        brush: {
+          points: points.map((point) => ({ x: clamp(point.x, 0, 1), y: clamp(point.y, 0, 1) })),
+          size: clamp(size, 0.01, 0.35),
+        },
+        keyframes: [{ t: 0, x: 0.5, y: 0.5, w: 1, h: 1 }],
+      };
+      set({
+        censors: [...get().censors, region],
+        selectedOverlayId: region.id,
+        result: null, estimate: null,
+      });
+    },
+
     duplicateCensor: (id, timeMs) => {
       const source = get().censors.find((region) => region.id === id);
       if (!source) return;
@@ -1055,6 +1078,12 @@ export const useStore = create<AppState>()((set, get) => {
         ...source,
         id: uid(),
         range: source.range && { ...source.range },
+        brush: source.brush && {
+          ...source.brush,
+          points: source.brush.points.map((point) => ({
+            x: clamp(point.x + 0.04, 0, 1), y: clamp(point.y + 0.04, 0, 1),
+          })),
+        },
         // A small offset makes the copy visible and preserves its exact size.
         keyframes: [{ t: 0, ...here, x: clamp(here.x + 0.04, 0, 1), y: clamp(here.y + 0.04, 0, 1) }],
       };
