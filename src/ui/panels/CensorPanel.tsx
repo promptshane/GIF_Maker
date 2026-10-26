@@ -10,9 +10,14 @@ const EFFECTS: Array<{ value: CensorEffect; label: string }> = [
   { value: 'blur', label: 'Blur' },
   { value: 'pixelate', label: 'Pixelate' },
   { value: 'black', label: 'Black' },
+  { value: 'smear', label: 'Smear' },
+  { value: 'noise', label: 'Static / noise' },
+  { value: 'color', label: 'Custom color' },
+  { value: 'glass', label: 'Glass distortion' },
+  { value: 'spotlight', label: 'Spotlight (blur outside)' },
 ];
 
-const SHAPES: Array<{ value: CensorShape; label: string }> = [
+const SHAPES: Array<{ value: Exclude<CensorShape, 'brush'>; label: string }> = [
   { value: 'rect', label: 'Rectangle' },
   { value: 'circle', label: 'Circle' },
 ];
@@ -34,11 +39,25 @@ export function CensorPanel({
   durationMs,
   staticImage = false,
   zoom = 1,
+  brushActive = false,
+  brushSize = 0.07,
+  onToggleBrush,
+  onBrushSizeChange,
+  onDetectFaces,
+  detectingFaces = false,
+  faceStatus,
 }: {
   playheadMs: number;
   durationMs: number;
   staticImage?: boolean;
   zoom?: number;
+  brushActive?: boolean;
+  brushSize?: number;
+  onToggleBrush?: () => void;
+  onBrushSizeChange?: (size: number) => void;
+  onDetectFaces?: () => void;
+  detectingFaces?: boolean;
+  faceStatus?: string | null;
 }) {
   const censors = useStore((state) => state.censors);
   const selectedId = useStore((state) => state.selectedOverlayId);
@@ -92,6 +111,31 @@ export function CensorPanel({
             + Blur circle
           </button>
         </div>
+        <div className="chips" style={{ marginTop: 10 }}>
+          {onToggleBrush && (
+            <button type="button" className={`chip-btn${brushActive ? ' active' : ''}`}
+              aria-pressed={brushActive} onClick={onToggleBrush}>
+              {brushActive ? '✓ Done brushing' : '✎ Freehand brush'}
+            </button>
+          )}
+          {onDetectFaces && (
+            <button type="button" className="chip-btn" disabled={detectingFaces}
+              onClick={onDetectFaces}>
+              {detectingFaces ? 'Finding faces…' : '◎ Detect faces'}
+            </button>
+          )}
+        </div>
+        {brushActive && (
+          <>
+            <Field label="Brush size" value={`${Math.round(brushSize * 100)}%`}>
+              <input type="range" min={1} max={25} value={Math.round(brushSize * 100)}
+                aria-label="Brush size"
+                onChange={(event) => onBrushSizeChange?.(Number(event.target.value) / 100)} />
+            </Field>
+            <div className="hint">Paint directly on the image. Each stroke becomes an editable censor region.</div>
+          </>
+        )}
+        {faceStatus && <div className="hint" role="status">{faceStatus}</div>}
       </Field>
 
       {censors.length === 0 ? (
@@ -114,12 +158,8 @@ export function CensorPanel({
                   onClick={() => selectOverlay(region.id)}
                 >
                   {index + 1}.{' '}
-                  {region.effect === 'blur'
-                    ? 'Blur'
-                    : region.effect === 'pixelate'
-                      ? 'Pixelate'
-                      : 'Black'}{' '}
-                  {region.shape === 'circle' ? 'circle' : 'box'}
+                  {EFFECTS.find((effect) => effect.value === region.effect)?.label ?? 'Censor'}{' '}
+                  {region.shape === 'circle' ? 'circle' : region.shape === 'brush' ? 'stroke' : 'box'}
                   {region.keyframes.length > 1 ? ` · ${region.keyframes.length} keyframes` : ''}
                 </button>
                 <button
@@ -159,24 +199,26 @@ export function CensorPanel({
       {selected && rect && (
         <>
           <Field label="Effect">
-            <Segmented
-              ariaLabel="Censor effect"
-              options={EFFECTS}
+            <select className="blur-type-select" aria-label="Censor effect"
               value={selected.effect}
-              onChange={(effect) => updateCensor(selected.id, { effect })}
-            />
+              onChange={(event) => updateCensor(selected.id, { effect: event.target.value as CensorEffect })}>
+              {EFFECTS.map((effect) =>
+                <option key={effect.value} value={effect.value}>{effect.label}</option>)}
+            </select>
           </Field>
 
-          <Field label="Shape">
-            <Segmented
-              ariaLabel="Censor shape"
-              options={SHAPES}
-              value={selected.shape}
-              onChange={(shape) => updateCensor(selected.id, { shape })}
-            />
-          </Field>
+          {selected.shape !== 'brush' && (
+            <Field label="Shape">
+              <Segmented
+                ariaLabel="Censor shape"
+                options={SHAPES}
+                value={selected.shape}
+                onChange={(shape) => updateCensor(selected.id, { shape })}
+              />
+            </Field>
+          )}
 
-          {selected.effect !== 'black' && (
+          {selected.effect !== 'black' && selected.effect !== 'color' && (
             <Field label="Strength" value={`${Math.round(selected.strength * 100)}%`}>
               <input
                 type="range"
@@ -189,6 +231,21 @@ export function CensorPanel({
                 }
               />
             </Field>
+          )}
+
+          {selected.effect === 'color' && (
+            <>
+              <Field label="Color">
+                <input type="color" aria-label="Censor color"
+                  value={selected.color ?? '#000000'}
+                  onChange={(event) => updateCensor(selected.id, { color: event.target.value })} />
+              </Field>
+              <Field label="Opacity" value={`${Math.round((selected.opacity ?? 1) * 100)}%`}>
+                <input type="range" min={0} max={100}
+                  aria-label="Censor opacity" value={Math.round((selected.opacity ?? 1) * 100)}
+                  onChange={(event) => updateCensor(selected.id, { opacity: Number(event.target.value) / 100 })} />
+              </Field>
+            </>
           )}
 
           {selected.effect === 'blur' && (
@@ -255,6 +312,7 @@ export function CensorPanel({
             </>
           )}
 
+          {selected.shape !== 'brush' && (<>
           <Field label="Size" value={`${formatSizePercent(rect.w)} × ${formatSizePercent(rect.h)}`}>
             <div className="size-axis-label">Horizontal</div>
             <div className="stepper-row">
@@ -337,7 +395,9 @@ export function CensorPanel({
             </div>
           </Field>
 
-          {!staticImage && <Field label="Follow movement" value={`${selected.keyframes.length} keyframe${selected.keyframes.length === 1 ? '' : 's'}`}>
+          </>)}
+
+          {!staticImage && selected.shape !== 'brush' && <Field label="Follow movement" value={`${selected.keyframes.length} keyframe${selected.keyframes.length === 1 ? '' : 's'}`}>
             <div className="chips">
               <button
                 type="button"
