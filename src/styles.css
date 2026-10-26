@@ -412,6 +412,13 @@ button {
   pointer-events: none;
 }
 
+.brush-selection-outline {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 4;
+}
+
 .stage-content {
   position: absolute;
   inset: 0;
