@@ -113,6 +113,10 @@ export function pickEdits(state: ProjectEdits): ProjectEdits {
       ...region,
       range: region.range && { ...region.range },
       keyframes: region.keyframes.map((key) => ({ ...key })),
+      brush: region.brush && {
+        ...region.brush,
+        points: region.brush.points.map((point) => ({ ...point })),
+      },
     })),
   };
 }
