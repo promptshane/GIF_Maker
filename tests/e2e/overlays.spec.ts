@@ -107,14 +107,14 @@ test.describe('Censor', () => {
     await backToEditor(page);
 
     // Switching to pixelate must produce a different image, not the same one.
-    await page.locator('.segmented').getByRole('button', { name: 'Pixelate', exact: true }).click();
+    await page.getByRole('combobox', { name: 'Censor effect' }).selectOption('pixelate');
     await generate(page);
     const pixelated = frameRgb(await readResultGif(page), 0);
     expect(frameDifference(blurred.data, pixelated.data)).toBeGreaterThan(0.5);
     await backToEditor(page);
 
     // Strength genuinely changes the result too.
-    await page.locator('.segmented').getByRole('button', { name: 'Blur', exact: true }).click();
+    await page.getByRole('combobox', { name: 'Censor effect' }).selectOption('blur');
     await page.getByRole('slider', { name: 'Censor strength' }).fill('10');
     await generate(page);
     const weak = frameRgb(await readResultGif(page), 0);
