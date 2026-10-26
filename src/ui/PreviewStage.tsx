@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CensorRegion, Sticker } from '../state/types';
 import { censorRectAt, isActiveAt } from '../render/timeline';
 import { clamp } from '../render/geometry';
@@ -46,12 +46,51 @@ export function PreviewStage(props: StageProps) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const { view, zoomBy, resetZoom, pointerCountRef, suppressCensorDragRef } =
     useCensorPreviewZoom(viewportRef, mode === 'censor', box, props.onZoomChange);
+  const [zoomControlsVisible, setZoomControlsVisible] = useState(false);
+  const zoomControlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showZoomControlsBriefly = useCallback(() => {
+    setZoomControlsVisible(true);
+    if (zoomControlsTimerRef.current !== null) clearTimeout(zoomControlsTimerRef.current);
+    zoomControlsTimerRef.current = setTimeout(() => {
+      setZoomControlsVisible(false);
+      zoomControlsTimerRef.current = null;
+    }, 1600);
+  }, []);
+
+  useEffect(() => {
+    if (mode === 'censor') showZoomControlsBriefly();
+    else setZoomControlsVisible(false);
+    return () => {
+      if (zoomControlsTimerRef.current !== null) {
+        clearTimeout(zoomControlsTimerRef.current);
+        zoomControlsTimerRef.current = null;
+      }
+    };
+  }, [mode, view.zoom, showZoomControlsBriefly]);
+
+  const nearZoomControls = (element: HTMLDivElement, x: number, y: number) => {
+    const rect = element.getBoundingClientRect();
+    return x >= rect.right - 160 && y >= rect.bottom - 64;
+  };
 
   return (
     <div
       ref={viewportRef}
       className={`stage-inner${mode === 'censor' ? ' censor-viewport' : ''}`}
       style={{ width: box.width, height: box.height }}
+      onPointerMove={(event) => {
+        if (mode === 'censor' && event.pointerType === 'mouse' &&
+            nearZoomControls(event.currentTarget, event.clientX, event.clientY)) {
+          showZoomControlsBriefly();
+        }
+      }}
+      onPointerDown={(event) => {
+        if (mode === 'censor' && event.pointerType !== 'mouse' &&
+            nearZoomControls(event.currentTarget, event.clientX, event.clientY)) {
+          showZoomControlsBriefly();
+        }
+      }}
     >
       <div
         className="stage-content"
@@ -74,7 +113,7 @@ export function PreviewStage(props: StageProps) {
         )}
       </div>
       {mode === 'censor' && (
-        <div className="preview-zoom-controls" role="group" aria-label="Censor preview zoom">
+        <div className={`preview-zoom-controls${zoomControlsVisible ? ' is-visible' : ''}`} role="group" aria-label="Censor preview zoom">
           <button type="button" aria-label="Zoom out preview" disabled={view.zoom <= 1} onClick={() => zoomBy(1 / 1.5)}>−</button>
           <button type="button" className="preview-zoom-level" aria-label="Reset preview zoom" onClick={resetZoom} title="Reset preview zoom">
             {Math.round(view.zoom * 100)}%
