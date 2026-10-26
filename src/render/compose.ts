@@ -55,6 +55,59 @@ export function featherOpacity(distance: number, featherPx: number): number {
   return t * t * (3 - 2 * t);
 }
 
+
+/** Add a region's outline to the current path; brush paths are rendered as
+ * overlapping round caps and joined quads so the exact same mask is exported. */
+function appendCensorPath(
+  ctx: Ctx2D, region: CensorRegion, g: CensorPixelGeometry, width: number, height: number,
+): void {
+  if (region.shape === 'brush') {
+    const stroke = region.brush;
+    if (!stroke?.points.length) return;
+    const radius = Math.max(0.5, stroke.size * Math.min(width, height) / 2);
+    const points = stroke.points.map((point) => ({ x: point.x * width, y: point.y * height }));
+    for (const point of points) {
+      ctx.moveTo(point.x + radius, point.y);
+      ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
+      ctx.closePath();
+    }
+    for (let i = 1; i < points.length; i++) {
+      const from = points[i - 1];
+      const to = points[i];
+      const distance = Math.hypot(to.x - from.x, to.y - from.y);
+      if (distance < 0.01) continue;
+      const dx = (to.y - from.y) / distance * radius;
+      const dy = (from.x - to.x) / distance * radius;
+      ctx.moveTo(from.x + dx, from.y + dy);
+      ctx.lineTo(to.x + dx, to.y + dy);
+      ctx.lineTo(to.x - dx, to.y - dy);
+      ctx.lineTo(from.x - dx, from.y - dy);
+      ctx.closePath();
+    }
+  } else if (region.shape === 'circle') {
+    ctx.ellipse(g.x + g.w / 2, g.y + g.h / 2,
+      Math.max(0.5, g.w / 2), Math.max(0.5, g.h / 2), 0, 0, Math.PI * 2);
+  } else {
+    ctx.rect(g.left, g.top, g.clipW, g.clipH);
+  }
+}
+
+function geometryForCensor(region: CensorRegion, timeMs: number, width: number, height: number) {
+  if (region.shape !== 'brush' || !region.brush?.points.length) {
+    return censorPixelGeometry(censorRectAt(region, timeMs), width, height);
+  }
+  const points = region.brush.points;
+  const radius = region.brush.size * Math.min(width, height) / 2;
+  const minX = Math.min(...points.map((point) => point.x * width)) - radius;
+  const maxX = Math.max(...points.map((point) => point.x * width)) + radius;
+  const minY = Math.min(...points.map((point) => point.y * height)) - radius;
+  const maxY = Math.max(...points.map((point) => point.y * height)) + radius;
+  return censorPixelGeometry({
+    x: (minX + maxX) / (2 * width), y: (minY + maxY) / (2 * height),
+    w: (maxX - minX) / width, h: (maxY - minY) / height,
+  }, width, height);
+}
+
 export interface CensorPixelGeometry {
   x: number;
   y: number;
@@ -221,31 +274,36 @@ export class Compositor {
   ): void {
     for (const region of censors) {
       if (!isActiveAt(region.range, timeMs)) continue;
-      const r = censorRectAt(region, timeMs);
-      const g = censorPixelGeometry(r, width, height);
+      const g = geometryForCensor(region, timeMs, width, height);
 
       // The visible clip stays fractional for smooth animated resizing. The
       // effect itself samples the smallest whole-pixel box covering that clip.
       if (g.clipW <= 0 || g.clipH <= 0 || g.sampleW < 1 || g.sampleH < 1) continue;
 
-      if (region.effect === 'black') {
+      if (region.effect === 'black' || region.effect === 'color') {
         ctx.save();
-        ctx.fillStyle = '#000000';
+        ctx.fillStyle = region.effect === 'black' ? '#000000' : (region.color ?? '#000000');
+        ctx.globalAlpha = region.effect === 'black' ? 1 : clamp(region.opacity ?? 1, 0, 1);
         ctx.beginPath();
-        if (region.shape === 'circle') {
-          ctx.ellipse(
-            g.x + g.w / 2,
-            g.y + g.h / 2,
-            Math.max(0.5, g.w / 2),
-            Math.max(0.5, g.h / 2),
-            0,
-            0,
-            Math.PI * 2,
-          );
-        } else {
-          ctx.rect(g.left, g.top, g.clipW, g.clipH);
-        }
+        appendCensorPath(ctx, region, g, width, height);
         ctx.fill();
+        ctx.restore();
+        continue;
+      }
+
+      if (region.effect === 'spotlight') {
+        // Preserve the chosen area; blur everything outside it.
+        const base = Math.min(width, height);
+        const processed = this.blurRegion(ctx, 0, 0, width, height,
+          blurRadius(region.strength, base), width, height, 'gaussian', 0, 0);
+        if (!processed) continue;
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(0, 0, width, height);
+        appendCensorPath(ctx, region, g, width, height);
+        ctx.clip('evenodd');
+        ctx.drawImage(processed.canvas, processed.sx, processed.sy, width, height,
+          0, 0, width, height);
         ctx.restore();
         continue;
       }
@@ -253,29 +311,21 @@ export class Compositor {
       // Strength is measured against the *canvas*, never the region: making a
       // region bigger must not also make its blur softer or its blocks coarser.
       const base = Math.min(width, height);
-      const processed =
-        region.effect === 'pixelate'
-          ? this.pixelateRegion(
-              ctx,
-              g.sampleX,
-              g.sampleY,
-              g.sampleW,
-              g.sampleH,
-              pixelBlockSize(region.strength, base),
-            )
-          : this.blurRegion(
-              ctx,
-              g.sampleX,
-              g.sampleY,
-              g.sampleW,
-              g.sampleH,
-              blurRadius(region.strength, base),
-              width,
-              height,
-              region.blurType ?? 'gaussian',
-              region.motionAngle ?? 0,
-              region.grain ?? 0.5,
-            );
+      const processed = region.effect === 'pixelate'
+        ? this.pixelateRegion(ctx, g.sampleX, g.sampleY, g.sampleW, g.sampleH,
+            pixelBlockSize(region.strength, base))
+        : region.effect === 'noise'
+          ? this.noiseRegion(g.sampleX, g.sampleY, g.sampleW, g.sampleH,
+              region.strength, timeMs)
+        : region.effect === 'smear'
+          ? this.smearRegion(ctx, g.sampleX, g.sampleY, g.sampleW, g.sampleH,
+              region.strength)
+        : region.effect === 'glass'
+          ? this.glassRegion(ctx, g.sampleX, g.sampleY, g.sampleW, g.sampleH,
+              region.strength)
+        : this.blurRegion(ctx, g.sampleX, g.sampleY, g.sampleW, g.sampleH,
+            blurRadius(region.strength, base), width, height,
+            region.blurType ?? 'gaussian', region.motionAngle ?? 0, region.grain ?? 0.5);
       if (!processed) continue;
       // Mask the processed patch, not the source frame, so the soft edge
       // smoothly reveals the untouched image underneath.
@@ -285,20 +335,7 @@ export class Compositor {
 
       ctx.save();
       ctx.beginPath();
-      if (region.shape === 'circle') {
-        // Ellipse inscribed in the (unclipped) region box, then clipped to canvas.
-        ctx.ellipse(
-          g.x + g.w / 2,
-          g.y + g.h / 2,
-          Math.max(0.5, g.w / 2),
-          Math.max(0.5, g.h / 2),
-          0,
-          0,
-          Math.PI * 2,
-        );
-      } else {
-        ctx.rect(g.left, g.top, g.clipW, g.clipH);
-      }
+      appendCensorPath(ctx, region, g, width, height);
       ctx.clip();
       ctx.imageSmoothingEnabled = region.effect !== 'pixelate';
       ctx.drawImage(
@@ -340,6 +377,62 @@ export class Compositor {
   }
 
   // -------------------------------------------------------------- internals
+
+  /** Horizontal photographic smear, using a narrow sampled strip per row. */
+  private smearRegion(ctx: Ctx2D, x: number, y: number, w: number, h: number, strength: number): RenderedPatch {
+    const output = this.surface('a', w, h);
+    const sourceW = Math.max(1, Math.round(w * (0.5 - clamp(strength, 0, 1) * 0.47)));
+    output.ctx.save();
+    output.ctx.imageSmoothingEnabled = true;
+    output.ctx.drawImage(ctx.canvas as CanvasImageSource,
+      x + (w - sourceW) / 2, y, sourceW, h, 0, 0, w, h);
+    output.ctx.restore();
+    return { canvas: output.canvas, sx: 0, sy: 0 };
+  }
+
+  /** Procedural opaque monochrome TV noise. */
+  private noiseRegion(x: number, y: number, w: number, h: number, strength: number, timeMs: number): RenderedPatch {
+    const output = this.surface('a', w, h);
+    const pixels = output.ctx.createImageData(w, h);
+    const contrast = 0.35 + clamp(strength, 0, 1) * 0.65;
+    const frame = Math.floor(timeMs / 100);
+    for (let py = 0; py < h; py++) {
+      for (let px = 0; px < w; px++) {
+        let hash = Math.imul(px + x + 1, 374761393) +
+          Math.imul(py + y + 1, 668265263) + Math.imul(frame + 1, 1442695041);
+        hash = Math.imul(hash ^ (hash >>> 13), 1274126177);
+        const raw = ((hash ^ (hash >>> 16)) >>> 0) / 4294967295;
+        const value = Math.round(clamp(128 + (raw - 0.5) * 255 * 2 * contrast, 0, 255));
+        const offset = (py * w + px) * 4;
+        pixels.data[offset] = value;
+        pixels.data[offset + 1] = value;
+        pixels.data[offset + 2] = value;
+        pixels.data[offset + 3] = 255;
+      }
+    }
+    output.ctx.putImageData(pixels, 0, 0);
+    return { canvas: output.canvas, sx: 0, sy: 0 };
+  }
+
+  /** Wavy refraction sampled from an unchanged source patch. */
+  private glassRegion(ctx: Ctx2D, x: number, y: number, w: number, h: number, strength: number): RenderedPatch {
+    const shiftMax = Math.max(1, Math.round(2 + clamp(strength, 0, 1) * 28));
+    const source = this.surface('b', w + shiftMax * 2, h);
+    source.ctx.drawImage(ctx.canvas as CanvasImageSource,
+      x - shiftMax, y, w + shiftMax * 2, h, 0, 0, w + shiftMax * 2, h);
+    const output = this.surface('a', w, h);
+    const wave = Math.max(6, 28 - clamp(strength, 0, 1) * 18);
+    output.ctx.save();
+    output.ctx.imageSmoothingEnabled = true;
+    for (let row = 0; row < h; row += 2) {
+      const strip = Math.min(2, h - row);
+      const shift = Math.sin((y + row) / wave) * shiftMax;
+      output.ctx.drawImage(source.canvas, shiftMax + shift, row, w, strip,
+        0, row, w, strip);
+    }
+    output.ctx.restore();
+    return { canvas: output.canvas, sx: 0, sy: 0 };
+  }
 
   private pixelateRegion(
     ctx: Ctx2D,
