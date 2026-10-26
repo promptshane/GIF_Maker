@@ -162,6 +162,28 @@ test.describe('Censor editing', () => {
     await expect(page.getByRole('button', { name: 'Reset preview zoom' })).toHaveText('100%');
   });
 
+  test('preview zoom controls fade away and reappear when needed', async ({ page }) => {
+    await openApp(page);
+    await importPhotos(page, [PHOTOS[0]]);
+    await openTab(page, 'Censor');
+
+    const controls = page.locator('.preview-zoom-controls');
+    const level = page.getByRole('button', { name: 'Reset preview zoom' });
+    await page.getByRole('button', { name: 'Zoom in preview' }).click();
+    await expect(level).toHaveText('150%');
+    await expect(controls).toHaveCSS('opacity', '1');
+    await expect(controls).toHaveCSS('opacity', '0', { timeout: 5000 });
+
+    // The hidden pill does not cover the image, but moving to its corner
+    // exposes the controls again for mouse users.
+    const stage = (await page.locator('.stage-inner').boundingBox())!;
+    await page.mouse.move(stage.x + stage.width - 20, stage.y + stage.height - 20);
+    await expect(controls).toHaveCSS('opacity', '1');
+    await page.getByRole('button', { name: 'Zoom out preview' }).click();
+    await expect(level).toHaveText('100%');
+    await expect(controls).toHaveCSS('opacity', '0', { timeout: 5000 });
+  });
+
   test('two-finger pinch zooms the preview without resizing a censor', async ({ page }) => {
     await openApp(page);
     await importPhotos(page, [PHOTOS[0]]);
