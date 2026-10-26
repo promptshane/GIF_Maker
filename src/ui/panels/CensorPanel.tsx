@@ -202,8 +202,9 @@ export function CensorPanel({
             <select className="blur-type-select" aria-label="Censor effect"
               value={selected.effect}
               onChange={(event) => updateCensor(selected.id, { effect: event.target.value as CensorEffect })}>
-              {EFFECTS.map((effect) =>
-                <option key={effect.value} value={effect.value}>{effect.label}</option>)}
+              {EFFECTS.filter((effect) => selected.shape !== 'brush' || effect.value !== 'spotlight')
+                .map((effect) =>
+                  <option key={effect.value} value={effect.value}>{effect.label}</option>)}
             </select>
           </Field>
 
