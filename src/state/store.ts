@@ -195,6 +195,7 @@ interface AppState {
 
   addCensor: (effect: CensorEffect, shape: CensorShape) => void;
   addBrushCensor: (points: BrushPoint[], size: number) => void;
+  addFaceCensors: (faces: Array<{ x: number; y: number; w: number; h: number }>) => void;
   duplicateCensor: (id: string, timeMs: number) => void;
   updateCensor: (id: string, patch: Partial<Omit<CensorRegion, 'keyframes'>>) => void;
   removeCensor: (id: string) => void;
@@ -1066,6 +1067,25 @@ export const useStore = create<AppState>()((set, get) => {
       set({
         censors: [...get().censors, region],
         selectedOverlayId: region.id,
+        result: null, estimate: null,
+      });
+    },
+
+    addFaceCensors: (faces) => {
+      if (!faces.length) return;
+      const regions: CensorRegion[] = faces.map((face) => ({
+        id: uid(), shape: 'circle', effect: 'blur', strength: 0.8,
+        blurType: 'gaussian', feather: 0.12,
+        range: null,
+        keyframes: [{
+          t: 0, x: clamp(face.x, 0, 1), y: clamp(face.y, 0, 1),
+          w: clamp(face.w * 1.28, 0.02, 1.5),
+          h: clamp(face.h * 1.42, 0.02, 1.5),
+        }],
+      }));
+      set({
+        censors: [...get().censors, ...regions],
+        selectedOverlayId: regions[regions.length - 1].id,
         result: null, estimate: null,
       });
     },
